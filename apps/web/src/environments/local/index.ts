@@ -252,19 +252,16 @@ async function reconcileOnce(): Promise<void> {
   );
 }
 
-function hasPendingSecondary(): boolean {
-  const bootstraps = readBootstraps();
-  for (const bootstrap of bootstraps) {
-    if (bootstrap.id === PRIMARY_LOCAL_ENVIRONMENT_ID) continue;
-    if (!findRecordByInstanceId(bootstrap.id)) return true;
-  }
-  return false;
-}
-
 function scheduleAutoRetry(): void {
   if (autoRetryHandle !== null) return;
   if (autoRetryAttempt >= AUTO_RETRY_DELAYS_MS.length) return;
-  if (!hasPendingSecondary()) return;
+  // Note: we deliberately don't short-circuit when the current bootstraps
+  // list lacks any secondary entry. The desktop pool only publishes a
+  // backend's bootstrap once its first start cycle has produced a config
+  // (see desktop.ipc.window.getLocalEnvironmentBootstraps), so an in-flight
+  // WSL cold boot looks identical to "no WSL configured" from this side.
+  // We have to keep polling until either a secondary actually shows up or
+  // the budget runs out.
   const delay = AUTO_RETRY_DELAYS_MS[autoRetryAttempt];
   autoRetryAttempt += 1;
   autoRetryHandle = setTimeout(() => {
