@@ -17,6 +17,11 @@ import type {
 } from "@t3tools/contracts/relay";
 
 import * as RelayConfiguration from "../Config.ts";
+import {
+  managedEndpointDigestInput,
+  managedEndpointHostname,
+  managedEndpointTunnelName,
+} from "../deploymentConfig.ts";
 
 export class ManagedEndpointProvisioningNotConfigured extends Data.TaggedError(
   "ManagedEndpointProvisioningNotConfigured",
@@ -132,40 +137,14 @@ export class ManagedEndpointDnsClient extends Context.Service<
 const requireCloudflareSettings = Effect.fnUntraced(function* (
   settings: RelayConfiguration.RelayConfigurationShape,
 ) {
-  if (!settings.managedEndpointBaseDomain) {
+  if (!settings.managedEndpointBaseDomain || !settings.managedEndpointNamespace) {
     return yield* new ManagedEndpointProvisioningNotConfigured();
   }
   return {
     baseDomain: settings.managedEndpointBaseDomain,
+    namespace: settings.managedEndpointNamespace,
   };
 });
-
-const MANAGED_ENDPOINT_HOST_PREFIX = "tunnels";
-const DNS_LABEL_MAX_LENGTH = 63;
-const MANAGED_ENDPOINT_HASH_LENGTH = 16;
-const MANAGED_ENDPOINT_SAFE_ID_LENGTH =
-  DNS_LABEL_MAX_LENGTH - MANAGED_ENDPOINT_HOST_PREFIX.length - 2 - MANAGED_ENDPOINT_HASH_LENGTH;
-
-function managedHostname(environmentId: string, baseDomain: string, hash: string): string {
-  const safeId = environmentId
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9-]/g, "-")
-    .replaceAll(/-+/g, "-")
-    .replaceAll(/^-+|-+$/g, "")
-    .slice(0, MANAGED_ENDPOINT_SAFE_ID_LENGTH);
-  const prefix = safeId.length > 0 ? safeId : "env";
-  return `${MANAGED_ENDPOINT_HOST_PREFIX}-${prefix}-${hash.slice(0, MANAGED_ENDPOINT_HASH_LENGTH)}.${baseDomain.replace(/^\.+|\.+$/g, "")}`;
-}
-
-function managedTunnelName(environmentId: string, hash: string): string {
-  const safeId = environmentId
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9-]/g, "-")
-    .replaceAll(/-+/g, "-")
-    .replaceAll(/^-+|-+$/g, "")
-    .slice(0, 64);
-  return `t3-code-${safeId.length > 0 ? safeId : "env"}-${hash.slice(0, 16)}`;
-}
 
 function formatOriginService(origin: RelayManagedEndpointOrigin): string {
   const host = origin.localHttpHost.includes(":")
@@ -212,13 +191,16 @@ const make = Effect.gen(function* () {
       }
       const cf = yield* requireCloudflareSettings(config);
       const environmentHash = yield* crypto
-        .digest("SHA-256", new TextEncoder().encode(input.environmentId))
+        .digest(
+          "SHA-256",
+          new TextEncoder().encode(managedEndpointDigestInput(cf.namespace, input.environmentId)),
+        )
         .pipe(
           Effect.map(Encoding.encodeHex),
           Effect.mapError((cause) => new ManagedEndpointProvisioningFailed({ cause })),
         );
-      const hostname = managedHostname(input.environmentId, cf.baseDomain, environmentHash);
-      const tunnelName = managedTunnelName(input.environmentId, environmentHash);
+      const hostname = managedEndpointHostname(cf.namespace, cf.baseDomain, environmentHash);
+      const tunnelName = managedEndpointTunnelName(cf.namespace, environmentHash);
 
       const tunnel = yield* tunnels.list({ name: tunnelName, isDeleted: false }).pipe(
         Effect.map((tunnels) => tunnels.result),

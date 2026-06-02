@@ -20,9 +20,11 @@ const config = RelayConfiguration.RelayConfiguration.of({
   },
   apnsDeliveryJobSigningSecret: Redacted.make("job-secret"),
   clerkSecretKey: Redacted.make("clerk-secret"),
+  clerkPublishableKey: "pk_test_test",
   cloudMintPrivateKey: Redacted.make("cloud-private-key"),
   cloudMintPublicKey: "cloud-public-key",
   managedEndpointBaseDomain: "t3code.test",
+  managedEndpointNamespace: "dev_julius",
 });
 
 interface TunnelCall {
@@ -90,13 +92,19 @@ function providerLayer(tunnelClient = makeTunnelClient(), dnsClient = makeDnsCli
 }
 
 function expectedManagedHostname(environmentId: string): string {
-  const hash = NodeCrypto.createHash("sha256").update(environmentId).digest("hex").slice(0, 16);
-  return `tunnels-env-abc-${hash}.t3code.test`;
+  const hash = NodeCrypto.createHash("sha256")
+    .update(`dev_julius:${environmentId}`)
+    .digest("hex")
+    .slice(0, 16);
+  return `tunnels-dev-julius-${hash}.t3code.test`;
 }
 
 function expectedManagedTunnelName(environmentId: string): string {
-  const hash = NodeCrypto.createHash("sha256").update(environmentId).digest("hex").slice(0, 16);
-  return `t3-code-env-abc-${hash}`;
+  const hash = NodeCrypto.createHash("sha256")
+    .update(`dev_julius:${environmentId}`)
+    .digest("hex")
+    .slice(0, 16);
+  return `t3coderelay-managedendpoint-dev-julius-${hash}`;
 }
 
 describe("ManagedEndpointProvider", () => {
@@ -162,58 +170,52 @@ describe("ManagedEndpointProvider", () => {
     }).pipe(Effect.provide(providerLayer(makeTunnelClient(tunnelCalls), makeDnsClient(dnsCalls))));
   });
 
-  it.effect(
-    "normalizes unusual environment ids before using them in Cloudflare tunnel names",
-    () => {
-      const tunnelCalls: TunnelCall[] = [];
+  it.effect("uses stage-scoped stable names without leaking unusual environment ids", () => {
+    const tunnelCalls: TunnelCall[] = [];
 
-      return Effect.gen(function* () {
-        const environmentId = "ENV With Spaces/../Symbols!" + "x".repeat(80);
-        const provider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
-        yield* provider.provision({
-          environmentId,
-          origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
-        });
+    return Effect.gen(function* () {
+      const environmentId = "ENV With Spaces/../Symbols!" + "x".repeat(80);
+      const provider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
+      yield* provider.provision({
+        environmentId,
+        origin: { localHttpHost: "127.0.0.1", localHttpPort: 3773 },
+      });
 
-        const requestedName = (
-          tunnelCalls.find((call) => call.operation === "list")?.input as
-            | { readonly name?: string }
-            | undefined
-        )?.name;
-        expect(requestedName).toMatch(/^t3-code-env-with-spaces-symbols-x+-[a-f0-9]{16}$/);
-        expect(requestedName?.length).toBeLessThanOrEqual(89);
-        const configBody = (
-          tunnelCalls.find((call) => call.operation === "putConfiguration")?.input as
-            | { readonly tunnelConfig?: unknown }
-            | undefined
-        )?.tunnelConfig;
-        expect(configBody).toMatchObject({
-          ingress: [
-            {
-              hostname: expect.stringMatching(
-                /^tunnels-env-with-spaces-symbols-x+-[a-f0-9]{16}\.t3code\.test$/,
-              ),
-            },
-            { service: "http_status:404" },
-          ],
-        });
-        const hostname = (
-          configBody as
-            | {
-                readonly ingress?: readonly [{ readonly hostname?: unknown }, unknown];
-              }
-            | undefined
-        )?.ingress?.[0]?.hostname;
-        expect(
-          typeof hostname === "string" ? hostname.split(".")[0]?.length : 0,
-        ).toBeLessThanOrEqual(63);
-        expect(tunnelCalls.find((call) => call.operation === "create")?.input).toMatchObject({
-          name: requestedName,
-          configSrc: "cloudflare",
-        });
-      }).pipe(Effect.provide(providerLayer(makeTunnelClient(tunnelCalls))));
-    },
-  );
+      const requestedName = (
+        tunnelCalls.find((call) => call.operation === "list")?.input as
+          | { readonly name?: string }
+          | undefined
+      )?.name;
+      expect(requestedName).toMatch(/^t3coderelay-managedendpoint-dev-julius-[a-f0-9]{16}$/);
+      const configBody = (
+        tunnelCalls.find((call) => call.operation === "putConfiguration")?.input as
+          | { readonly tunnelConfig?: unknown }
+          | undefined
+      )?.tunnelConfig;
+      expect(configBody).toMatchObject({
+        ingress: [
+          {
+            hostname: expect.stringMatching(/^tunnels-dev-julius-[a-f0-9]{16}\.t3code\.test$/),
+          },
+          { service: "http_status:404" },
+        ],
+      });
+      const hostname = (
+        configBody as
+          | {
+              readonly ingress?: readonly [{ readonly hostname?: unknown }, unknown];
+            }
+          | undefined
+      )?.ingress?.[0]?.hostname;
+      expect(typeof hostname === "string" ? hostname.split(".")[0]?.length : 0).toBeLessThanOrEqual(
+        63,
+      );
+      expect(tunnelCalls.find((call) => call.operation === "create")?.input).toMatchObject({
+        name: requestedName,
+        configSrc: "cloudflare",
+      });
+    }).pipe(Effect.provide(providerLayer(makeTunnelClient(tunnelCalls))));
+  });
 
   it.effect("formats IPv6 loopback origins as valid Cloudflare ingress service URLs", () => {
     const tunnelCalls: TunnelCall[] = [];

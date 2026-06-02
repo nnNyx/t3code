@@ -65,9 +65,11 @@ const settings = RelayConfiguration.RelayConfiguration.of({
   },
   apnsDeliveryJobSigningSecret: Redacted.make("job-secret"),
   clerkSecretKey: Redacted.make("clerk-secret"),
+  clerkPublishableKey: "pk_test_test",
   cloudMintPrivateKey: Redacted.make(cloudKeyPair.privateKey),
   cloudMintPublicKey: cloudKeyPair.publicKey,
   managedEndpointBaseDomain: undefined,
+  managedEndpointNamespace: undefined,
 });
 
 function signTestJwt(payload: object, typ: string, privateKey: string): string {

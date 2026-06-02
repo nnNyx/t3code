@@ -95,12 +95,17 @@ developer stages:
 
 ```sh
 bun --cwd infra/relay run deploy -- --stage prod
-bun --cwd infra/relay run deploy -- --stage "$USER" --env-file .env.local
+bun --cwd infra/relay run deploy -- --env-file .env.local
 ```
 
-After a successful deploy, the wrapper updates the repository-root `.env` file with the relay URL
-derived from `T3_RELAY_DOMAIN`. That makes subsequent source builds point at the relay that was just
-deployed without copying the URL manually.
+Alchemy defaults personal deployments to the `dev_$USER` stage. Relay custom domains apply the same
+DNS-safe sanitization as Alchemy physical resource names, so `prod` uses
+`relay.<T3_RELAY_ZONE_NAME>` and `dev_julius` uses `relay-dev-julius.<T3_RELAY_ZONE_NAME>`.
+`T3_RELAY_DOMAIN` remains available as an explicit override.
+
+After a successful deploy, the wrapper updates the repository-root `.env` file with the derived relay
+URL. That makes subsequent source builds point at the relay that was just deployed without copying
+the URL manually.
 
 ### Deployment CI
 
@@ -125,10 +130,9 @@ The repository must define these Actions secrets shared by relay deployments:
 
 The `production` GitHub environment must define these Actions variables:
 
-- `T3_RELAY_DOMAIN`
 - `T3_RELAY_ZONE_NAME`
+- `T3_RELAY_DOMAIN` if overriding the derived production relay domain
 - `T3CODE_CLERK_PUBLISHABLE_KEY`
-- `CLERK_CLI_OAUTH_CLIENT_ID`
 - `APNS_ENVIRONMENT`
 - `APNS_TEAM_ID`
 - `APNS_KEY_ID`

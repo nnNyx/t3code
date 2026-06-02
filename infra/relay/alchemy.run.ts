@@ -30,6 +30,7 @@ export default Alchemy.Stack(
 
     return {
       databaseName: db.database.name,
+      databaseBranchName: db.branch?.name ?? "main",
       hyperdriveName: hyperdrive.name,
       workerName: api.workerName,
       url: api.url,

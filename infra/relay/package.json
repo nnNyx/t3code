@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "deploy": "alchemy deploy",
+    "deploy": "node scripts/deploy.ts",
     "destroy": "alchemy destroy",
     "test": "vitest run",
     "typecheck": "tsgo --noEmit"

@@ -1,4 +1,4 @@
-import { verifyToken } from "@clerk/backend";
+import { createClerkClient, verifyToken } from "@clerk/backend";
 import { sql as drizzleSql } from "drizzle-orm";
 import * as Data from "effect/Data";
 import * as Crypto from "effect/Crypto";
@@ -188,7 +188,7 @@ export const relayClientAuthLayer = Layer.effect(
     return {
       bearer: Effect.fn("relay.auth.client.bearer")(function* (httpEffect, { credential }) {
         const token = readHttpAuthorizationCredential(credential);
-        const verified = yield* verifyClerkBearerToken(config, token).pipe(
+        const verified = yield* verifyRelayClientBearerToken(config, token).pipe(
           Effect.tapError((error) =>
             Effect.annotateCurrentSpan(
               "relay.auth.clerk_verification_failure",
@@ -197,16 +197,14 @@ export const relayClientAuthLayer = Layer.effect(
           ),
           Effect.catch(() => relayAuthInvalidError("invalid_bearer")),
         );
-        if (!verified.sub || !hasExpectedClerkAudience(verified.aud, config.relayIssuer)) {
+        if (!verified.sub) {
           yield* Effect.annotateCurrentSpan({
-            "relay.auth.clerk_verification_failure": !verified.sub
-              ? "missing_subject"
-              : "missing_relay_audience",
+            "relay.auth.clerk_verification_failure": "missing_subject",
           });
           return yield* relayAuthInvalidError("invalid_bearer");
         }
         yield* Effect.annotateCurrentSpan({
-          "relay.auth.mode": "clerk_bearer",
+          "relay.auth.mode": verified.mode,
           "relay.auth.subject": verified.sub,
         });
 
@@ -982,6 +980,50 @@ function verifyClerkBearerToken(config: RelayConfiguration.RelayConfigurationSha
     Effect.withSpan("verify_clerk_bearer_token", {
       attributes: { "relay.auth.token_length": token.length },
     }),
+  );
+}
+
+function verifyClerkOAuthBearerToken(
+  config: RelayConfiguration.RelayConfigurationShape,
+  token: string,
+) {
+  return Effect.tryPromise({
+    try: async () => {
+      const client = createClerkClient({
+        secretKey: Redacted.value(config.clerkSecretKey),
+        publishableKey: config.clerkPublishableKey,
+      });
+      const state = await client.authenticateRequest(
+        new Request(config.relayIssuer, {
+          headers: { authorization: `Bearer ${token}` },
+        }),
+        { acceptsToken: "oauth_token" },
+      );
+      const auth = state.toAuth();
+      if (!state.isAuthenticated || !auth.userId) {
+        throw new Error("Clerk OAuth token is not authenticated.");
+      }
+      return { sub: auth.userId };
+    },
+    catch: (cause) => new ClerkTokenVerificationFailed({ cause }),
+  });
+}
+
+export function verifyRelayClientBearerToken(
+  config: RelayConfiguration.RelayConfigurationShape,
+  token: string,
+) {
+  return verifyClerkBearerToken(config, token).pipe(
+    Effect.flatMap((verified) =>
+      verified.sub && hasExpectedClerkAudience(verified.aud, config.relayIssuer)
+        ? Effect.succeed({ sub: verified.sub, mode: "clerk_session_bearer" as const })
+        : Effect.fail(new ClerkTokenVerificationFailed({ cause: "missing_relay_audience" })),
+    ),
+    Effect.catch(() =>
+      verifyClerkOAuthBearerToken(config, token).pipe(
+        Effect.map((verified) => ({ ...verified, mode: "clerk_oauth_bearer" as const })),
+      ),
+    ),
   );
 }
 

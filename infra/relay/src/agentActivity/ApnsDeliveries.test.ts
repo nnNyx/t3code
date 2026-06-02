@@ -38,9 +38,11 @@ const config = RelayConfiguration.RelayConfiguration.of({
   },
   apnsDeliveryJobSigningSecret: Redacted.make("job-signing-secret"),
   clerkSecretKey: Redacted.make("clerk-secret"),
+  clerkPublishableKey: "pk_test_test",
   cloudMintPrivateKey: Redacted.make("cloud-private-key"),
   cloudMintPublicKey: "cloud-public-key",
   managedEndpointBaseDomain: undefined,
+  managedEndpointNamespace: undefined,
 });
 
 const apnsSigningKeyPair = NodeCrypto.generateKeyPairSync("ec", {

@@ -88,7 +88,7 @@ const ApnsDeliveryJobSigningSecret = Alchemy.makeRandom("ApnsDeliveryJobSigningS
 export default class Api extends Cloudflare.Worker<Api>()(
   "Api",
   RelayDeploymentConfig.pipe(
-    Config.map(({ relayPublicDomain }) => ({
+    Effect.map(({ relayPublicDomain }) => ({
       main: import.meta.filename,
       compatibility: {
         date: "2026-05-22",
@@ -102,7 +102,7 @@ export default class Api extends Cloudflare.Worker<Api>()(
     //
     // 1. Provision Infrastructure for the Worker to use
     //
-    const { relayPublicOrigin } = yield* RelayDeploymentConfig;
+    const { relayPublicOrigin, stage } = yield* RelayDeploymentConfig;
     const apnsDeliveryQueue = yield* RelayApnsDeliveryQueue;
     const apnsDeliveryDeadLetterQueue = yield* RelayApnsDeliveryDeadLetterQueue;
     const cloudMintKeyPair = yield* CloudMintKeyPair;
@@ -129,6 +129,7 @@ export default class Api extends Cloudflare.Worker<Api>()(
     const axiomTracesEndpoint = yield* observability.traces.otelTracesEndpoint;
 
     const clerkSecretKey = yield* Config.redacted("CLERK_SECRET_KEY");
+    const clerkPublishableKey = yield* Config.string("T3CODE_CLERK_PUBLISHABLE_KEY");
 
     const cloudMintPrivateKey = yield* cloudMintKeyPair.privateKey;
     const cloudMintPublicKey = yield* cloudMintKeyPair.publicKey;
@@ -156,9 +157,11 @@ export default class Api extends Cloudflare.Worker<Api>()(
         },
         apnsDeliveryJobSigningSecret: yield* apnsDeliveryJobSigningSecret,
         clerkSecretKey,
+        clerkPublishableKey,
         cloudMintPrivateKey: yield* cloudMintPrivateKey,
         cloudMintPublicKey: yield* cloudMintPublicKey,
         managedEndpointBaseDomain: yield* managedEndpointZoneName,
+        managedEndpointNamespace: stage,
       });
     });
 
