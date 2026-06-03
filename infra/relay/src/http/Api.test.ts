@@ -15,6 +15,7 @@ import { RelayEnvironmentAuth } from "@t3tools/contracts/relay";
 
 import {
   relayCors,
+  relayDocsRedirectRoute,
   relayEnvironmentAuthLayer,
   relayNotFoundRoute,
   traceRelayHttpRequestWith,
@@ -198,6 +199,22 @@ describe("relay request tracing", () => {
 });
 
 describe("relay routing fallback", () => {
+  it.effect("redirects the relay root to the API docs", () =>
+    Effect.gen(function* () {
+      const request = HttpServerRequest.fromWeb(new Request("https://relay.test/"));
+      const httpEffect = yield* HttpRouter.toHttpEffect(
+        Layer.mergeAll(relayDocsRedirectRoute, relayNotFoundRoute, relayCors),
+      );
+      const response = yield* httpEffect.pipe(
+        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+      );
+
+      expect(response.status).toBe(302);
+      expect(response.headers.location).toBe("/docs");
+      expect(response.headers["access-control-allow-origin"]).toBe("*");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("returns a CORS-compatible 404 response for unmatched paths", () =>
     Effect.gen(function* () {
       const request = HttpServerRequest.fromWeb(

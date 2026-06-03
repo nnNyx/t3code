@@ -152,6 +152,12 @@ export const relayNotFoundRoute = HttpRouter.add(
   HttpServerResponse.empty({ status: 404 }),
 );
 
+export const relayDocsRedirectRoute = HttpRouter.add(
+  "GET",
+  "/",
+  HttpServerResponse.redirect("/docs"),
+);
+
 export const traceRelayHttpRequest = <E, R>(
   httpEffect: Effect.Effect<
     HttpServerResponse.HttpServerResponse,

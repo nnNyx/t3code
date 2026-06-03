@@ -23,6 +23,7 @@ import {
   relayClientAuthLayer,
   relayDpopClientAuthLayer,
   relayCors,
+  relayDocsRedirectRoute,
   relayEnvironmentAuthLayer,
   relayNotFoundRoute,
   serverApi,
@@ -254,6 +255,7 @@ export default class Api extends Cloudflare.Worker<Api>()(
           Layer.provide(appLayer),
         ),
         HttpApiScalar.layer(RelayApi, { path: "/docs" }),
+        relayDocsRedirectRoute,
       ).pipe(Layer.provide([Etag.layerWeak, httpPlatformNotSupportedLayer, relayCors])),
       relayNotFoundRoute,
     ).pipe(
