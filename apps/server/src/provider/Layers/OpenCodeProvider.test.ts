@@ -27,9 +27,9 @@ const DEFAULT_VERSION_STDOUT = "opencode 1.14.19\n";
 
 const runtimeMock = {
   state: {
-    runVersionError: null as Error | null,
+    runVersionError: null as OpenCodeRuntime.OpenCodeRuntimeError | null,
     versionStdout: DEFAULT_VERSION_STDOUT,
-    inventoryError: null as Error | null,
+    inventoryError: null as OpenCodeRuntime.OpenCodeRuntimeError | null,
     closeCalls: 0,
     inventory: {
       providerList: { connected: [] as string[], all: [] as unknown[], default: {} },
@@ -71,13 +71,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntime["Service"] = {
     }),
   runOpenCodeCommand: () =>
     runtimeMock.state.runVersionError
-      ? Effect.fail(
-          new OpenCodeRuntime.OpenCodeRuntimeError({
-            operation: "runOpenCodeCommand",
-            detail: runtimeMock.state.runVersionError.message,
-            cause: runtimeMock.state.runVersionError,
-          }),
-        )
+      ? Effect.fail(runtimeMock.state.runVersionError)
       : Effect.succeed({ stdout: runtimeMock.state.versionStdout, stderr: "", code: 0 }),
   createOpenCodeSdkClient: () =>
     ({}) as unknown as ReturnType<
@@ -85,13 +79,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntime["Service"] = {
     >,
   loadOpenCodeInventory: () =>
     runtimeMock.state.inventoryError
-      ? Effect.fail(
-          new OpenCodeRuntime.OpenCodeRuntimeError({
-            operation: "loadOpenCodeInventory",
-            detail: runtimeMock.state.inventoryError.message,
-            cause: runtimeMock.state.inventoryError,
-          }),
-        )
+      ? Effect.fail(runtimeMock.state.inventoryError)
       : Effect.succeed(runtimeMock.state.inventory as OpenCodeRuntime.OpenCodeInventory),
 };
 
@@ -117,7 +105,10 @@ const makeOpenCodeSettings = (overrides?: Partial<OpenCodeSettings>): OpenCodeSe
 it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
   it.effect("shows a codex-style missing binary message", () =>
     Effect.gen(function* () {
-      runtimeMock.state.runVersionError = new Error("spawn opencode ENOENT");
+      runtimeMock.state.runVersionError = new OpenCodeRuntime.OpenCodeRuntimeError({
+        operation: "runOpenCodeCommand",
+        detail: "OpenCode executable was not found.",
+      });
       const snapshot = yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd());
 
       NodeAssert.equal(snapshot.status, "error");
@@ -131,7 +122,10 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
 
   it.effect("hides generic Effect.tryPromise text for local CLI probe failures", () =>
     Effect.gen(function* () {
-      runtimeMock.state.runVersionError = new Error("An error occurred in Effect.tryPromise");
+      runtimeMock.state.runVersionError = new OpenCodeRuntime.OpenCodeRuntimeError({
+        operation: "runOpenCodeCommand",
+        detail: "An error occurred in Effect.tryPromise",
+      });
       const snapshot = yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd());
 
       NodeAssert.equal(snapshot.status, "error");
@@ -207,7 +201,11 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
 it.layer(testLayer)("checkOpenCodeProviderStatus with configured server URL", (it) => {
   it.effect("surfaces a friendly auth error for configured servers", () =>
     Effect.gen(function* () {
-      runtimeMock.state.inventoryError = new Error("401 Unauthorized");
+      runtimeMock.state.inventoryError = OpenCodeRuntime.OpenCodeRuntimeError.fromCause({
+        operation: "provider.list",
+        detail: "OpenCode SDK request failed.",
+        cause: Object.assign(new Error("Unauthorized"), { response: { status: 401 } }),
+      });
       const snapshot = yield* checkOpenCodeProviderStatus(
         makeOpenCodeSettings({
           serverUrl: "http://127.0.0.1:9999",
@@ -227,9 +225,11 @@ it.layer(testLayer)("checkOpenCodeProviderStatus with configured server URL", (i
 
   it.effect("surfaces a friendly connection error for configured servers", () =>
     Effect.gen(function* () {
-      runtimeMock.state.inventoryError = new Error(
-        "fetch failed: connect ECONNREFUSED 127.0.0.1:9999",
-      );
+      runtimeMock.state.inventoryError = OpenCodeRuntime.OpenCodeRuntimeError.fromCause({
+        operation: "provider.list",
+        detail: "OpenCode SDK request failed.",
+        cause: new Error("fetch failed: connect ECONNREFUSED 127.0.0.1:9999"),
+      });
       const snapshot = yield* checkOpenCodeProviderStatus(
         makeOpenCodeSettings({
           serverUrl: "http://127.0.0.1:9999",

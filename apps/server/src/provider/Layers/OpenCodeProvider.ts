@@ -59,20 +59,52 @@ function normalizedErrorMessage(cause: unknown): string | undefined {
   return normalizeProbeMessage(cause.message);
 }
 
+function classificationSignal(cause: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = cause;
+  const visited = new Set<unknown>();
+
+  while (current != null && !visited.has(current)) {
+    visited.add(current);
+    if (current instanceof OpenCodeProbeError) {
+      parts.push(current.detail);
+      const inner = current.cause;
+      if (OpenCodeRuntime.isOpenCodeRuntimeError(inner)) {
+        parts.push(inner.detail);
+        if (inner.responseStatus !== undefined) parts.push(String(inner.responseStatus));
+        current = inner.cause;
+      } else {
+        current = inner;
+      }
+    } else if (OpenCodeRuntime.isOpenCodeRuntimeError(current)) {
+      parts.push(current.detail);
+      if (current.responseStatus !== undefined) parts.push(String(current.responseStatus));
+      current = current.cause;
+    } else if (current instanceof Error) {
+      parts.push(current.message);
+      current = (current as { cause?: unknown }).cause;
+    } else {
+      break;
+    }
+  }
+
+  return parts.join(" ").toLowerCase();
+}
+
 function formatOpenCodeProbeError(input: {
   readonly cause: unknown;
   readonly isExternalServer: boolean;
   readonly serverUrl: string;
 }): { readonly installed: boolean; readonly message: string } {
   const detail = normalizedErrorMessage(input.cause);
-  const lower = detail?.toLowerCase() ?? "";
+  const signal = classificationSignal(input.cause);
 
   if (input.isExternalServer) {
     if (
-      lower.includes("401") ||
-      lower.includes("403") ||
-      lower.includes("unauthorized") ||
-      lower.includes("forbidden")
+      signal.includes("401") ||
+      signal.includes("403") ||
+      signal.includes("unauthorized") ||
+      signal.includes("forbidden")
     ) {
       return {
         installed: true,
@@ -81,13 +113,13 @@ function formatOpenCodeProbeError(input: {
     }
 
     if (
-      lower.includes("econnrefused") ||
-      lower.includes("enotfound") ||
-      lower.includes("fetch failed") ||
-      lower.includes("networkerror") ||
-      lower.includes("timed out") ||
-      lower.includes("timeout") ||
-      lower.includes("socket hang up")
+      signal.includes("econnrefused") ||
+      signal.includes("enotfound") ||
+      signal.includes("fetch failed") ||
+      signal.includes("networkerror") ||
+      signal.includes("timed out") ||
+      signal.includes("timeout") ||
+      signal.includes("socket hang up")
     ) {
       return {
         installed: true,
@@ -101,14 +133,18 @@ function formatOpenCodeProbeError(input: {
     };
   }
 
-  if (lower.includes("enoent") || lower.includes("notfound")) {
+  if (
+    signal.includes("enoent") ||
+    signal.includes("executable was not found") ||
+    signal.includes("notfound")
+  ) {
     return {
       installed: false,
       message: "OpenCode CLI (`opencode`) is not installed or not on PATH.",
     };
   }
 
-  if (lower.includes("quarantine")) {
+  if (signal.includes("quarantine")) {
     return {
       installed: true,
       message:
@@ -116,7 +152,7 @@ function formatOpenCodeProbeError(input: {
     };
   }
 
-  if (lower.includes("invalid code signature") || lower.includes("corrupted")) {
+  if (signal.includes("invalid code signature") || signal.includes("corrupted")) {
     return {
       installed: true,
       message:
