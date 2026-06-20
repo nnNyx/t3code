@@ -342,6 +342,25 @@ describe("ssh tunnel scripts", () => {
     );
   });
 
+  it("preserves structured readiness attributes in diagnostic output", () => {
+    assert.deepEqual(
+      SshTunnel.describeReadinessCause(
+        new SshReadinessProbeTimeoutError({
+          requestUrl: "http://127.0.0.1:41773/ready",
+          timeoutMs: 250,
+          attempt: 3,
+        }),
+      ),
+      {
+        _tag: "SshReadinessProbeTimeoutError",
+        requestUrl: "http://127.0.0.1:41773/ready",
+        timeoutMs: 250,
+        attempt: 3,
+        message: "Backend readiness probe exceeded 250ms at http://127.0.0.1:41773/ready.",
+      },
+    );
+  });
+
   it.effect("accepts pretty-printed pairing JSON from the remote CLI", () => {
     const target = {
       alias: "devbox",

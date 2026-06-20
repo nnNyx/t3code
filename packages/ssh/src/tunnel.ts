@@ -244,9 +244,11 @@ function applyScriptPlaceholders(
 
 export function describeReadinessCause(cause: unknown): unknown {
   if (isSshReadinessError(cause)) {
-    const nestedCause = "cause" in cause ? cause.cause : undefined;
+    const { cause: nestedCause, ...attributes } = cause as SshReadinessError & {
+      readonly cause?: unknown;
+    };
     return {
-      _tag: cause._tag,
+      ...attributes,
       message: cause.message,
       ...(nestedCause === undefined ? {} : { cause: describeReadinessCause(nestedCause) }),
     };
