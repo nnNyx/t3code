@@ -10,7 +10,14 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import type { ConnectionRegistration } from "../connection/catalog.ts";
-import type { ConnectionTarget } from "../connection/model.ts";
+import {
+  type ConnectionStorageOperation,
+  ConnectionStorageOperationError,
+  type ConnectionTarget,
+  type ConnectionTransientError,
+} from "../connection/model.ts";
+
+const isConnectionStorageOperationError = Schema.is(ConnectionStorageOperationError);
 
 export class ConnectionPersistenceError extends Schema.TaggedErrorClass<ConnectionPersistenceError>()(
   "ConnectionPersistenceError",
@@ -26,7 +33,16 @@ export class ConnectionPersistenceError extends Schema.TaggedErrorClass<Connecti
       "remove-thread",
       "clear-environment",
     ]),
-    stage: Schema.Literals(["resolve", "read", "parse", "decode", "encode", "write", "remove"]),
+    stage: Schema.Literals([
+      "resolve",
+      "read",
+      "parse",
+      "decode",
+      "encode",
+      "migrate",
+      "write",
+      "remove",
+    ]),
     resource: Schema.Literals([
       "connection-catalog",
       "shell-cache",
@@ -39,6 +55,52 @@ export class ConnectionPersistenceError extends Schema.TaggedErrorClass<Connecti
     cause: Schema.Defect(),
   },
 ) {
+  static fromStorageFailure(input: {
+    readonly operation: ConnectionPersistenceError["operation"];
+    readonly fallbackStage: ConnectionPersistenceError["stage"];
+    readonly resource: ConnectionPersistenceError["resource"];
+    readonly environmentId?: EnvironmentId;
+    readonly threadId?: ThreadId;
+    readonly path?: string;
+    readonly cause: ConnectionTransientError;
+  }) {
+    const { cause, fallbackStage, ...attributes } = input;
+    const storageCause = cause.cause;
+    const stage = isConnectionStorageOperationError(storageCause)
+      ? ConnectionPersistenceError.storageOperationStage(storageCause.operation)
+      : fallbackStage;
+
+    return new ConnectionPersistenceError({
+      ...attributes,
+      stage,
+      cause,
+    });
+  }
+
+  private static storageOperationStage(
+    operation: ConnectionStorageOperation,
+  ): ConnectionPersistenceError["stage"] {
+    switch (operation) {
+      case "open":
+        return "resolve";
+      case "read":
+      case "load":
+        return "read";
+      case "decode":
+        return "decode";
+      case "encode":
+        return "encode";
+      case "migrate":
+        return "migrate";
+      case "write":
+      case "save":
+        return "write";
+      case "delete":
+      case "remove":
+        return "remove";
+    }
+  }
+
   override get message(): string {
     const environment =
       this.environmentId === undefined ? "" : ` for environment ${this.environmentId}`;

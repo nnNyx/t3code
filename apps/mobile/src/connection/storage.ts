@@ -208,14 +208,13 @@ export const connectionStorageLayer = Layer.effectContext(
     const targetStore = ConnectionTargetStore.of({
       list: catalog.read.pipe(
         Effect.map((document) => document.targets),
-        Effect.mapError(
-          (cause) =>
-            new ConnectionPersistenceError({
-              operation: "list-targets",
-              stage: "read",
-              resource: "connection-catalog",
-              cause,
-            }),
+        Effect.mapError((cause) =>
+          ConnectionPersistenceError.fromStorageFailure({
+            operation: "list-targets",
+            fallbackStage: "read",
+            resource: "connection-catalog",
+            cause,
+          }),
         ),
       ),
     });
@@ -224,30 +223,28 @@ export const connectionStorageLayer = Layer.effectContext(
         catalog
           .update((document) => registerConnectionInCatalog(document, registration))
           .pipe(
-            Effect.mapError(
-              (cause) =>
-                new ConnectionPersistenceError({
-                  operation: "register-connection",
-                  stage: "write",
-                  resource: "connection-catalog",
-                  environmentId: registration.target.environmentId,
-                  cause,
-                }),
+            Effect.mapError((cause) =>
+              ConnectionPersistenceError.fromStorageFailure({
+                operation: "register-connection",
+                fallbackStage: "write",
+                resource: "connection-catalog",
+                environmentId: registration.target.environmentId,
+                cause,
+              }),
             ),
           ),
       remove: (target) =>
         catalog
           .update((document) => removeConnectionFromCatalog(document, target))
           .pipe(
-            Effect.mapError(
-              (cause) =>
-                new ConnectionPersistenceError({
-                  operation: "remove-connection",
-                  stage: "write",
-                  resource: "connection-catalog",
-                  environmentId: target.environmentId,
-                  cause,
-                }),
+            Effect.mapError((cause) =>
+              ConnectionPersistenceError.fromStorageFailure({
+                operation: "remove-connection",
+                fallbackStage: "write",
+                resource: "connection-catalog",
+                environmentId: target.environmentId,
+                cause,
+              }),
             ),
           ),
     });
