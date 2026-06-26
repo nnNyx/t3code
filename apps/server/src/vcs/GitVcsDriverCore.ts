@@ -1042,10 +1042,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const refreshStatusRemoteCacheEntry = Effect.fn("refreshStatusRemoteCacheEntry")(function* (
     cacheKey: StatusRemoteRefreshCacheKey,
   ) {
-    yield* withStatusRefreshLock(
-      cacheKey.objectDir,
-      fetchRemoteForStatus(cacheKey.cwd, cacheKey.remoteName),
-    );
+    yield* fetchRemoteForStatus(cacheKey.cwd, cacheKey.remoteName);
     return true as const;
   });
 
@@ -1061,9 +1058,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const upstream = yield* resolveCurrentUpstream(cwd);
     if (!upstream) return;
     const objectDir = yield* resolveCanonicalGitObjectDir(cwd);
-    yield* Cache.get(
-      statusRemoteRefreshCache,
-      new StatusRemoteRefreshCacheKey(objectDir, upstream.remoteName, cwd),
+    yield* withStatusRefreshLock(
+      objectDir,
+      Cache.get(
+        statusRemoteRefreshCache,
+        new StatusRemoteRefreshCacheKey(objectDir, upstream.remoteName, cwd),
+      ),
     );
   });
 

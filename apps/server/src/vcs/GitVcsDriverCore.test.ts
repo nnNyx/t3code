@@ -2,10 +2,12 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it, describe } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Scope from "effect/Scope";
+import * as TestClock from "effect/testing/TestClock";
 
 import { GitCommandError } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
@@ -666,6 +668,115 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
               else process.env.T3_TEST_FETCH_OVERLAP_LOG = previousOverlapLog;
             }),
           ),
+        );
+      }),
+    );
+
+    it.effect("keeps a waiting worktree refresh alive when the cache owner disconnects", () =>
+      Effect.gen(function* () {
+        const platform = yield* HostProcessPlatform;
+        if (platform === "win32") return;
+
+        const cwd = yield* makeTmpDir();
+        const origin = yield* makeTmpDir("git-vcs-driver-origin-");
+        const worktreeParent = yield* makeTmpDir("git-vcs-driver-worktrees-");
+        const wrapperDir = yield* makeTmpDir("git-vcs-driver-wrapper-");
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        const worktreeCwd = pathService.join(worktreeParent, "feature");
+        const realGit = yield* findGitExecutable();
+        const wrapperPath = pathService.join(wrapperDir, "git");
+        const invocationLogPath = pathService.join(wrapperDir, "fetches.txt");
+        const ownerLockPath = pathService.join(wrapperDir, "owner-fetch");
+        const ownerStartedPath = pathService.join(wrapperDir, "owner-started");
+        const waiterReadyPath = pathService.join(wrapperDir, "waiter-ready");
+        const envKeys = [
+          "PATH",
+          "T3_TEST_REAL_GIT",
+          "T3_TEST_FETCH_INVOCATION_LOG",
+          "T3_TEST_FETCH_OWNER_LOCK",
+          "T3_TEST_FETCH_OWNER_STARTED",
+          "T3_TEST_FETCH_WAITER_CWD",
+          "T3_TEST_FETCH_WAITER_READY",
+        ] as const;
+        const previousEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
+
+        yield* git(origin, ["init", "--bare"]);
+        yield* git(cwd, ["remote", "add", "origin", origin]);
+        yield* git(cwd, ["push", "-u", "origin", initialBranch]);
+        yield* git(cwd, ["worktree", "add", "-b", "feature/interrupted", worktreeCwd]);
+        yield* git(worktreeCwd, ["push", "-u", "origin", "feature/interrupted"]);
+        yield* fileSystem.writeFileString(
+          wrapperPath,
+          [
+            "#!/bin/sh",
+            "is_fetch=0",
+            "is_common_dir=0",
+            'for arg in "$@"; do',
+            '  if [ "$arg" = "fetch" ]; then is_fetch=1; fi',
+            '  if [ "$arg" = "--git-common-dir" ]; then is_common_dir=1; fi',
+            "done",
+            'if [ "$is_fetch" = "1" ]; then',
+            '  printf "start:%s\\n" "$PWD" >> "$T3_TEST_FETCH_INVOCATION_LOG"',
+            '  if mkdir "$T3_TEST_FETCH_OWNER_LOCK" 2>/dev/null; then',
+            '    : > "$T3_TEST_FETCH_OWNER_STARTED"',
+            "    trap 'exit 130' INT TERM HUP",
+            "    while :; do sleep 1; done",
+            "  fi",
+            '  exec "$T3_TEST_REAL_GIT" "$@"',
+            "fi",
+            '"$T3_TEST_REAL_GIT" "$@"',
+            "status=$?",
+            'if [ "$PWD" = "$T3_TEST_FETCH_WAITER_CWD" ] && [ "$is_common_dir" = "1" ]; then',
+            '  : > "$T3_TEST_FETCH_WAITER_READY"',
+            "fi",
+            "exit $status",
+            "",
+          ].join("\n"),
+        );
+        yield* fileSystem.chmod(wrapperPath, 0o755);
+
+        yield* Effect.gen(function* () {
+          process.env.PATH = `${wrapperDir}:${previousEnv.get("PATH") ?? ""}`;
+          process.env.T3_TEST_REAL_GIT = realGit;
+          process.env.T3_TEST_FETCH_INVOCATION_LOG = invocationLogPath;
+          process.env.T3_TEST_FETCH_OWNER_LOCK = ownerLockPath;
+          process.env.T3_TEST_FETCH_OWNER_STARTED = ownerStartedPath;
+          process.env.T3_TEST_FETCH_WAITER_CWD = worktreeCwd;
+          process.env.T3_TEST_FETCH_WAITER_READY = waiterReadyPath;
+
+          const waitForFile = (filePath: string) =>
+            Effect.gen(function* () {
+              while (!(yield* fileSystem.exists(filePath))) {
+                yield* Effect.sleep("10 millis");
+              }
+            }).pipe(Effect.timeout("2 seconds"));
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+          const owner = yield* driver.refreshStatusUpstream(cwd).pipe(Effect.forkChild);
+          yield* waitForFile(ownerStartedPath);
+
+          const waiter = yield* driver.refreshStatusUpstream(worktreeCwd).pipe(Effect.forkChild);
+          yield* waitForFile(waiterReadyPath);
+          yield* Effect.sleep("50 millis");
+          yield* Fiber.interrupt(owner);
+          yield* Fiber.join(waiter).pipe(Effect.timeout("5 seconds"));
+
+          assert.deepStrictEqual(
+            (yield* fileSystem.readFileString(invocationLogPath)).trim().split(/\r?\n/),
+            [`start:${cwd}`, `start:${worktreeCwd}`],
+          );
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              for (const key of envKeys) {
+                const previous = previousEnv.get(key);
+                if (previous === undefined) delete process.env[key];
+                else process.env[key] = previous;
+              }
+            }),
+          ),
+          TestClock.withLive,
         );
       }),
     );
