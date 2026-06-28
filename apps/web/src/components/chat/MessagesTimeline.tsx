@@ -69,8 +69,11 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveTimelineIsAtEnd,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
+  TIMELINE_MINIMAP_HEIGHT,
+  TIMELINE_MINIMAP_MIN_ITEMS,
   type TimelineLatestTurn,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
@@ -206,6 +209,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
+  const minimapStripRefs = useRef(new Map<string, HTMLButtonElement>());
 
   const onToggleTurnFold = useCallback((turnId: TurnId) => {
     setExpandedTurnIds((existing) => {
@@ -307,6 +311,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
+  const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
   const handleAnchorReady = useCallback(
     (info: { anchorIndex: number | undefined }) => {
       if (anchorMessageId !== null && info.anchorIndex !== undefined) {
@@ -334,10 +339,49 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
-    if (state) {
-      onIsAtEndChange(state.isAtEnd);
+    const isAtEnd = resolveTimelineIsAtEnd(state);
+    if (isAtEnd !== undefined) {
+      onIsAtEndChange(isAtEnd);
     }
-  }, [listRef, onIsAtEndChange]);
+    if (!state || minimapItems.length === 0) {
+      return;
+    }
+
+    const contentLength = Math.max(1, state.contentLength ?? 0);
+    const scrollTop = state.scroll ?? 0;
+    const scrollBottom = scrollTop + (state.scrollLength ?? 0);
+    const fallbackStep =
+      minimapItems.length > 1 ? TIMELINE_MINIMAP_HEIGHT / (minimapItems.length - 1) : 0;
+
+    for (const [fallbackIndex, item] of minimapItems.entries()) {
+      const strip = minimapStripRefs.current.get(item.id);
+      if (!strip) {
+        continue;
+      }
+
+      const rowTop = resolveTimelineRowTop(state, item.rowIndex);
+      const rowHeight = resolveTimelineRowHeight(state, item.rowIndex);
+      const top =
+        rowTop === null
+          ? fallbackIndex * fallbackStep
+          : Math.min(
+              TIMELINE_MINIMAP_HEIGHT,
+              Math.max(0, (rowTop / contentLength) * TIMELINE_MINIMAP_HEIGHT),
+            );
+      const inView =
+        rowTop !== null &&
+        rowTop < scrollBottom &&
+        rowTop + Math.max(1, rowHeight ?? 1) > scrollTop;
+
+      strip.style.top = `${top}px`;
+      strip.dataset.inView = inView ? "true" : "false";
+    }
+  }, [listRef, minimapItems, onIsAtEndChange]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(handleScroll);
+    return () => cancelAnimationFrame(frame);
+  }, [handleScroll, rows.length]);
 
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
@@ -422,6 +466,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           ListHeaderComponent={TIMELINE_LIST_HEADER}
           ListFooterComponent={TIMELINE_LIST_FOOTER}
         />
+        <TimelineMinimap
+          items={minimapItems}
+          stripRefs={minimapStripRefs}
+          onSelect={(item) => {
+            void listRef.current?.scrollToIndex({
+              index: item.rowIndex,
+              animated: true,
+              viewOffset: 24,
+            });
+          }}
+        />
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
   );
@@ -433,6 +488,136 @@ function keyExtractor(item: MessagesTimelineRow) {
 
 function getItemType(item: MessagesTimelineRow) {
   return item.kind === "message" ? `message:${item.message.role}` : item.kind;
+}
+
+interface TimelineMinimapItem {
+  readonly id: string;
+  readonly rowIndex: number;
+  readonly userText: string | null;
+  readonly assistantText: string | null;
+}
+
+interface TimelinePositionState {
+  readonly contentLength?: number;
+  readonly scroll?: number;
+  readonly scrollLength?: number;
+  readonly positionAtIndex?: (index: number) => number | undefined;
+  readonly sizeAtIndex?: (index: number) => number | undefined;
+}
+
+function deriveTimelineMinimapItems(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+): TimelineMinimapItem[] {
+  const items: TimelineMinimapItem[] = [];
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row?.kind !== "message" || row.message.role !== "user") {
+      continue;
+    }
+
+    items.push({
+      id: row.id,
+      rowIndex: index,
+      userText: compactMinimapPreview(row.message.text),
+      assistantText: compactMinimapPreview(resolveFinalAssistantTextForTurn(rows, index)),
+    });
+  }
+  return items;
+}
+
+function resolveFinalAssistantTextForTurn(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+  userRowIndex: number,
+) {
+  let finalAssistantText: string | null = null;
+  for (let index = userRowIndex + 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row?.kind !== "message") {
+      continue;
+    }
+    if (row.message.role === "user") {
+      break;
+    }
+    if (row.message.role === "assistant") {
+      finalAssistantText = row.message.text ?? null;
+    }
+  }
+  return finalAssistantText;
+}
+
+function compactMinimapPreview(text: string | null | undefined) {
+  const compact = text?.replace(/\s+/g, " ").trim() ?? "";
+  return compact.length > 0 ? compact : null;
+}
+
+function resolveTimelineRowTop(state: TimelinePositionState, rowIndex: number) {
+  const top = state.positionAtIndex?.(rowIndex);
+  return typeof top === "number" && Number.isFinite(top) ? top : null;
+}
+
+function resolveTimelineRowHeight(state: TimelinePositionState, rowIndex: number) {
+  const height = state.sizeAtIndex?.(rowIndex);
+  return typeof height === "number" && Number.isFinite(height) ? height : null;
+}
+
+function TimelineMinimap({
+  items,
+  stripRefs,
+  onSelect,
+}: {
+  items: ReadonlyArray<TimelineMinimapItem>;
+  stripRefs: React.RefObject<Map<string, HTMLButtonElement>>;
+  onSelect: (item: TimelineMinimapItem) => void;
+}) {
+  if (items.length < TIMELINE_MINIMAP_MIN_ITEMS) {
+    return null;
+  }
+
+  const fallbackStep = items.length > 1 ? TIMELINE_MINIMAP_HEIGHT / (items.length - 1) : 0;
+
+  return (
+    <div
+      className="pointer-events-none absolute top-1/2 left-[max(0.5rem,calc(50%-28rem))] z-20 hidden -translate-y-1/2 md:block"
+      data-testid="timeline-minimap"
+    >
+      <div className="relative w-12 select-none" style={{ height: TIMELINE_MINIMAP_HEIGHT }}>
+        <div className="absolute top-0 left-3 h-full w-px bg-border/15" />
+        {items.map((item, index) => {
+          const top = index * fallbackStep;
+          return (
+            <button
+              aria-label={`Jump to message: ${item.userText ?? "User message"}`}
+              className="pointer-events-auto group absolute left-0 flex h-4 w-12 -translate-y-1/2 cursor-pointer items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
+              data-in-view="false"
+              key={item.id}
+              onClick={() => onSelect(item)}
+              ref={(node) => {
+                if (node) {
+                  stripRefs.current.set(item.id, node);
+                } else {
+                  stripRefs.current.delete(item.id);
+                }
+              }}
+              style={{ top }}
+              type="button"
+            >
+              <span className="ml-0 h-px w-2.5 rounded-full bg-muted-foreground/35 transition-[background-color,width] duration-150 group-hover:w-7 group-hover:bg-muted-foreground/65 group-data-[in-view=true]:bg-foreground/90" />
+              <span className="pointer-events-none absolute top-1/2 left-8 hidden w-80 -translate-y-1/2 rounded-xl border border-border/70 bg-popover/95 p-3 text-left text-popover-foreground shadow-xl shadow-black/25 backdrop-blur group-hover:block group-focus-visible:block">
+                <span className="block truncate text-sm font-medium">
+                  {item.userText ?? "User message"}
+                </span>
+                {item.assistantText ? (
+                  <span className="mt-1 block line-clamp-3 text-muted-foreground text-sm">
+                    {item.assistantText}
+                  </span>
+                ) : null}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------

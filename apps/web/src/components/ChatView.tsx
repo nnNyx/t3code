@@ -1161,6 +1161,7 @@ function ChatViewContent(props: ChatViewProps) {
 
     const updateHeight = () => {
       const nextHeight = Math.ceil(composerOverlayElement.getBoundingClientRect().height);
+      if (nextHeight <= 0) return;
       setComposerOverlayHeight((currentHeight) =>
         currentHeight === nextHeight ? currentHeight : nextHeight,
       );
@@ -3148,18 +3149,61 @@ function ChatViewContent(props: ChatViewProps) {
     ],
   );
 
+  // Debounce *showing* the scroll-to-bottom pill so it doesn't flash during
+  // thread switches. LegendList fires scroll events with isAtEnd=false while
+  // initialScrollAtEnd is settling; hiding is always immediate.
+  const showScrollDebouncer = useRef(
+    new Debouncer(() => setShowScrollToBottom(true), { wait: 150 }),
+  );
+
   // Scrolling is explicit so streamed timeline updates never take control away
   // from the user after the newly sent row has been positioned once.
   const scrollToEnd = useCallback((animated = false) => {
+    isAtEndRef.current = true;
+    showScrollDebouncer.current.cancel();
+    setShowScrollToBottom(false);
     void legendListRef.current?.scrollToEnd?.({ animated });
   }, []);
   const positionedTimelineAnchorRef = useRef<MessageId | null>(null);
   const settledTimelineAnchorRef = useRef<MessageId | null>(null);
+  const anchorUserScrollGenerationRef = useRef(0);
   const pendingAnchorScrollRestoreRef = useRef<{
     readonly messageId: MessageId;
     readonly offset: number;
+    readonly userScrollGeneration: number;
   } | null>(null);
   const anchorScrollRestoreFrameRef = useRef<number | null>(null);
+  useEffect(() => {
+    let removeListeners: (() => void) | null = null;
+    const frame = requestAnimationFrame(() => {
+      const scrollNode = legendListRef.current?.getScrollableNode();
+      if (!scrollNode) {
+        return;
+      }
+      const markUserScrollIntent = () => {
+        anchorUserScrollGenerationRef.current += 1;
+        pendingAnchorScrollRestoreRef.current = null;
+        if (anchorScrollRestoreFrameRef.current !== null) {
+          cancelAnimationFrame(anchorScrollRestoreFrameRef.current);
+          anchorScrollRestoreFrameRef.current = null;
+        }
+      };
+      scrollNode.addEventListener("wheel", markUserScrollIntent, { passive: true });
+      scrollNode.addEventListener("touchmove", markUserScrollIntent, { passive: true });
+      scrollNode.addEventListener("pointerdown", markUserScrollIntent, { passive: true });
+      removeListeners = () => {
+        scrollNode.removeEventListener("wheel", markUserScrollIntent);
+        scrollNode.removeEventListener("touchmove", markUserScrollIntent);
+        scrollNode.removeEventListener("pointerdown", markUserScrollIntent);
+      };
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+      removeListeners?.();
+    };
+  }, [activeThread?.id]);
+
   const onTimelineAnchorReady = useCallback((messageId: MessageId, anchorIndex: number) => {
     if (positionedTimelineAnchorRef.current === messageId) {
       return;
@@ -3211,7 +3255,11 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
     if (pendingAnchorScrollRestoreRef.current === null) {
-      pendingAnchorScrollRestoreRef.current = { messageId, offset: scrollOffset };
+      pendingAnchorScrollRestoreRef.current = {
+        messageId,
+        offset: scrollOffset,
+        userScrollGeneration: anchorUserScrollGenerationRef.current,
+      };
     }
     if (anchorScrollRestoreFrameRef.current !== null) {
       return;
@@ -3220,18 +3268,23 @@ function ChatViewContent(props: ChatViewProps) {
       anchorScrollRestoreFrameRef.current = null;
       const pending = pendingAnchorScrollRestoreRef.current;
       pendingAnchorScrollRestoreRef.current = null;
-      if (pending && settledTimelineAnchorRef.current === pending.messageId) {
-        void legendListRef.current?.scrollToOffset({ offset: pending.offset, animated: false });
+      if (
+        pending &&
+        settledTimelineAnchorRef.current === pending.messageId &&
+        pending.userScrollGeneration === anchorUserScrollGenerationRef.current
+      ) {
+        const list = legendListRef.current;
+        const currentScrollOffset = list?.getState().scroll;
+        if (
+          typeof currentScrollOffset === "number" &&
+          Math.abs(currentScrollOffset - pending.offset) <= 2
+        ) {
+          void list?.scrollToOffset({ offset: pending.offset, animated: false });
+        }
       }
     });
   }, []);
 
-  // Debounce *showing* the scroll-to-bottom pill so it doesn't flash during
-  // thread switches.  LegendList fires scroll events with isAtEnd=false while
-  // initialScrollAtEnd is settling; hiding is always immediate.
-  const showScrollDebouncer = useRef(
-    new Debouncer(() => setShowScrollToBottom(true), { wait: 150 }),
-  );
   const onIsAtEndChange = useCallback((isAtEnd: boolean) => {
     if (isAtEndRef.current === isAtEnd) return;
     isAtEndRef.current = isAtEnd;
@@ -4870,7 +4923,7 @@ function ChatViewContent(props: ChatViewProps) {
                 onIsAtEndChange={onIsAtEndChange}
               />
 
-              {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
+              {/* scroll to end pill — shown when user has scrolled away from the live edge */}
               {showScrollToBottom && (
                 <div
                   className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5"
@@ -4878,11 +4931,13 @@ function ChatViewContent(props: ChatViewProps) {
                 >
                   <button
                     type="button"
+                    aria-label="Scroll to end"
+                    title="Scroll to end"
                     onClick={() => scrollToEnd(true)}
                     className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
                   >
                     <ChevronDownIcon className="size-3.5" />
-                    Scroll to bottom
+                    Scroll to end
                   </button>
                 </div>
               )}

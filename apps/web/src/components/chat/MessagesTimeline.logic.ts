@@ -10,6 +10,17 @@ import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../..
 import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@t3tools/contracts";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
+export const TIMELINE_MINIMAP_HEIGHT = 180;
+export const TIMELINE_MINIMAP_MIN_ITEMS = 2;
+
+export interface TimelineEndState {
+  readonly isAtEnd?: boolean;
+  readonly isNearEnd?: boolean;
+}
+
+export function resolveTimelineIsAtEnd(state: TimelineEndState | undefined): boolean | undefined {
+  return state?.isNearEnd ?? state?.isAtEnd;
+}
 
 function computeElapsedMs(startIso: string, endIso: string): number | null {
   const start = Date.parse(startIso);
