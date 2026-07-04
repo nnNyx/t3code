@@ -14,7 +14,13 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
+import { Platform, Pressable, StyleSheet, View, useColorScheme } from "react-native";
 import type { ColorValue } from "react-native";
+import { MenuView, type MenuAction } from "@react-native-menu/menu";
+import { SymbolView, type AndroidSymbol, type SFSymbol } from "expo-symbols";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { useThemeColor } from "../lib/useThemeColor";
 
 export {
   nativeHeaderScrollEdgeEffects,
@@ -253,39 +259,282 @@ function collectToolbarItems(children: ReactNode): NativeStackHeaderItem[] {
   return items;
 }
 
+/* ─── Android toolbar rendering ──────────────────────────────────────────
+ * react-native-screens' unstable_header*Items are iOS-only. On Android we
+ * render real UI instead: bottom placement becomes a floating action bar and
+ * left/right placement map to the native-stack header's headerLeft/headerRight
+ * slots. The iOS path (setOptions with unstable_* items) is left untouched. */
+
+/** Content height of the Android floating bottom action bar (excludes the
+ *  bottom safe-area inset, added as padding). Consumers that render a bottom
+ *  NativeHeaderToolbar must reserve this much bottom space in their scroll
+ *  content so it is not obscured. */
+export const ANDROID_BOTTOM_TOOLBAR_HEIGHT = 56;
+
+/** SF Symbol → Material Symbol name for every button/menu-anchor icon a
+ *  NativeHeaderToolbar consumer uses. expo-symbols draws Material Symbols on
+ *  Android; a bare SF Symbol string renders nothing there. Kept intentionally
+ *  small — only the icons that actually reach an Android SymbolView. */
+const SF_TO_MATERIAL_ICON: Readonly<Record<string, AndroidSymbol>> = {
+  "arrow.clockwise": "refresh",
+  "arrow.up.left.and.arrow.down.right": "open_in_full",
+  "chevron.left": "chevron_left",
+  ellipsis: "more_horiz",
+  folder: "folder",
+  gearshape: "settings",
+  "line.3.horizontal.decrease": "filter_list",
+  "line.3.horizontal.decrease.circle": "filter_list",
+  "line.3.horizontal.decrease.circle.fill": "filter_alt",
+  plus: "add",
+  "point.topleft.down.curvedto.point.bottomright.up": "account_tree",
+  "qrcode.viewfinder": "qr_code_scanner",
+  "sidebar.left": "dock_to_left",
+  "sidebar.right": "dock_to_right",
+  "square.and.pencil": "edit_square",
+  terminal: "terminal",
+  xmark: "close",
+};
+
+function androidSymbolName(
+  icon: NativeStackHeaderIcon | undefined,
+): { readonly ios: SFSymbol; readonly android: AndroidSymbol } | null {
+  const name = (icon as { readonly name?: unknown } | undefined)?.name;
+  if (typeof name !== "string") {
+    return null;
+  }
+  return { ios: name as SFSymbol, android: SF_TO_MATERIAL_ICON[name] ?? "more_horiz" };
+}
+
+type SerializedMenuItem = NativeStackHeaderItemMenu["menu"]["items"][number];
+
+/** Convert the serialized menu tree into @react-native-menu/menu actions,
+ *  registering each leaf's onPress in `handlers` keyed by a generated id.
+ *  Inline submenus flatten into the parent level: this matches iOS's inline
+ *  semantics and sidesteps Android's single-level submenu nesting limit. */
+function buildAndroidMenuActions(
+  items: readonly SerializedMenuItem[],
+  handlers: Map<string, () => void>,
+  prefix: string,
+): MenuAction[] {
+  const actions: MenuAction[] = [];
+  items.forEach((item, index) => {
+    const id = `${prefix}.${index}`;
+    if (item.type === "action") {
+      if (typeof item.onPress === "function") {
+        handlers.set(id, item.onPress);
+      }
+      actions.push({
+        id,
+        title: item.label,
+        subtitle: item.description,
+        // Android checkmarks the "on" item; leaving others unset (not "off")
+        // keeps them slot-free, mirroring iOS.
+        state: item.state === "on" ? "on" : undefined,
+        attributes: {
+          disabled: Boolean(item.disabled),
+          destructive: Boolean(item.destructive),
+        },
+      });
+      return;
+    }
+    if (item.inline) {
+      actions.push(...buildAndroidMenuActions(item.items, handlers, id));
+      return;
+    }
+    actions.push({
+      id,
+      title: item.label,
+      subactions: buildAndroidMenuActions(item.items, handlers, id),
+    });
+  });
+  return actions;
+}
+
+function AndroidToolbarPressable(props: {
+  readonly icon?: NativeStackHeaderIcon;
+  readonly accessibilityLabel?: string;
+  readonly disabled?: boolean;
+  readonly onPress?: () => void;
+  readonly tintColor: ColorValue;
+}) {
+  const symbol = androidSymbolName(props.icon);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={props.accessibilityLabel}
+      disabled={props.disabled}
+      hitSlop={8}
+      onPress={props.onPress}
+      style={({ pressed }) => ({
+        alignItems: "center",
+        justifyContent: "center",
+        minWidth: 40,
+        height: 40,
+        paddingHorizontal: 6,
+        opacity: props.disabled ? 0.4 : pressed ? 0.6 : 1,
+      })}
+    >
+      {symbol ? <SymbolView name={symbol} size={24} tintColor={props.tintColor} /> : null}
+    </Pressable>
+  );
+}
+
+function AndroidToolbarMenu(props: {
+  readonly item: Extract<NativeStackHeaderItem, { type: "menu" }>;
+  readonly tintColor: ColorValue;
+}) {
+  const isDark = useColorScheme() === "dark";
+  const handlers = new Map<string, () => void>();
+  const actions = buildAndroidMenuActions(props.item.menu.items, handlers, "menu");
+  return (
+    <MenuView
+      title={props.item.menu.title}
+      actions={actions}
+      onPressAction={({ nativeEvent }) => handlers.get(nativeEvent.event)?.()}
+      themeVariant={isDark ? "dark" : "light"}
+    >
+      <AndroidToolbarPressable
+        icon={props.item.icon}
+        accessibilityLabel={props.item.accessibilityLabel}
+        disabled={props.item.disabled}
+        tintColor={props.tintColor}
+      />
+    </MenuView>
+  );
+}
+
+function AndroidToolbarItem(props: {
+  readonly item: NativeStackHeaderItem;
+  readonly variant: "bottom" | "inline";
+  readonly tintColor: ColorValue;
+}) {
+  const { item } = props;
+  if (item.type === "button") {
+    return (
+      <AndroidToolbarPressable
+        icon={item.icon}
+        accessibilityLabel={item.accessibilityLabel}
+        disabled={item.disabled}
+        onPress={item.onPress}
+        tintColor={item.tintColor ?? props.tintColor}
+      />
+    );
+  }
+  if (item.type === "menu") {
+    return <AndroidToolbarMenu item={item} tintColor={item.tintColor ?? props.tintColor} />;
+  }
+  // Spacers carry layout meaning only inline; the bottom bar uses space-between
+  // and drops them.
+  if (item.type === "spacing" && props.variant === "inline") {
+    return <View style={{ width: item.spacing }} />;
+  }
+  return null;
+}
+
+function AndroidHeaderItems(props: { readonly items: readonly NativeStackHeaderItem[] }) {
+  const iconColor = useThemeColor("--color-icon");
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 2, paddingHorizontal: 4 }}>
+      {props.items.map((item, index) => (
+        <AndroidToolbarItem key={index} item={item} variant="inline" tintColor={iconColor} />
+      ))}
+    </View>
+  );
+}
+
+function AndroidBottomToolbar(props: { readonly items: readonly NativeStackHeaderItem[] }) {
+  const insets = useSafeAreaInsets();
+  const cardColor = useThemeColor("--color-card");
+  const borderColor = useThemeColor("--color-border");
+  const iconColor = useThemeColor("--color-icon");
+  const actionable = props.items.filter((item) => item.type === "button" || item.type === "menu");
+  if (actionable.length === 0) {
+    return null;
+  }
+  return (
+    <View
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        // Rendered before the screen body in the tree, so lift it above the
+        // (opaque) list: elevation orders + shadows on Android, zIndex backs it
+        // up at the Yoga level.
+        zIndex: 10,
+        elevation: 8,
+        height: ANDROID_BOTTOM_TOOLBAR_HEIGHT + insets.bottom,
+        paddingBottom: insets.bottom,
+        paddingHorizontal: 12,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        backgroundColor: cardColor,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: borderColor,
+      }}
+    >
+      {actionable.map((item, index) => (
+        <AndroidToolbarItem key={index} item={item} variant="bottom" tintColor={iconColor} />
+      ))}
+    </View>
+  );
+}
+
 function NativeHeaderToolbarRoot(props: {
   readonly placement?: "left" | "right" | "bottom";
   readonly children?: ReactNode;
 }) {
   const navigation = useNativeStackNavigation();
   const items = useMemo(() => collectToolbarItems(props.children), [props.children]);
+  const isIOS = Platform.OS === "ios";
 
   useEffect(() => {
     if (!navigation) {
       return;
     }
-    if (props.placement === "bottom") {
-      navigation.setOptions({
-        unstable_headerToolbarItems: () => items,
-      } as NativeStackOptionsWithToolbar);
-      return () => {
+    if (isIOS) {
+      if (props.placement === "bottom") {
         navigation.setOptions({
-          unstable_headerToolbarItems: () => [],
+          unstable_headerToolbarItems: () => items,
         } as NativeStackOptionsWithToolbar);
+        return () => {
+          navigation.setOptions({
+            unstable_headerToolbarItems: () => [],
+          } as NativeStackOptionsWithToolbar);
+        };
+      }
+      if (props.placement === "left") {
+        navigation.setOptions({ unstable_headerLeftItems: () => items });
+        return () => {
+          navigation.setOptions({ unstable_headerLeftItems: () => [] });
+        };
+      }
+      navigation.setOptions({ unstable_headerRightItems: () => items });
+      return () => {
+        navigation.setOptions({ unstable_headerRightItems: () => [] });
       };
+    }
+    // Android: bottom placement renders as a floating bar (returned below);
+    // left/right map to the native-stack header slots.
+    if (props.placement === "bottom") {
+      return;
     }
     if (props.placement === "left") {
-      navigation.setOptions({ unstable_headerLeftItems: () => items });
+      navigation.setOptions({ headerLeft: () => <AndroidHeaderItems items={items} /> });
       return () => {
-        navigation.setOptions({ unstable_headerLeftItems: () => [] });
+        navigation.setOptions({ headerLeft: undefined });
       };
     }
-    navigation.setOptions({ unstable_headerRightItems: () => items });
+    navigation.setOptions({ headerRight: () => <AndroidHeaderItems items={items} /> });
     return () => {
-      navigation.setOptions({ unstable_headerRightItems: () => [] });
+      navigation.setOptions({ headerRight: undefined });
     };
-  }, [items, navigation, props.placement]);
+  }, [isIOS, items, navigation, props.placement]);
 
+  if (!isIOS && props.placement === "bottom") {
+    return <AndroidBottomToolbar items={items} />;
+  }
   return null;
 }
 
