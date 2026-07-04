@@ -454,7 +454,12 @@ export const RootStack = createNativeStackNavigator({
 });
 type RootStackType = typeof RootStack;
 
-const navigationPathConfig = {
+// Passed as the linking `config` in App.tsx: initialRouteName makes deep
+// links synthesize Home beneath the target route, so back navigates home
+// instead of finishing the activity (previously this object was unused and
+// cold-start deep links produced a single-screen stack).
+export const navigationPathConfig = {
+  initialRouteName: "Home" as const,
   screens: createPathConfigForStaticNavigation(RootStack) ?? {},
 };
 

@@ -16,7 +16,7 @@ import { RegistryContext } from "@effect/atom-react";
 import { useEffect } from "react";
 import { CloudAuthProvider } from "./features/cloud/CloudAuthProvider";
 import { AppearancePreferencesProvider } from "./features/settings/appearance/AppearancePreferencesProvider";
-import { RootStack } from "./Stack";
+import { navigationPathConfig, RootStack } from "./Stack";
 import { appAtomRegistry } from "./state/atom-registry";
 import { useThemeColor } from "./lib/useThemeColor";
 
@@ -24,6 +24,7 @@ import "../global.css";
 
 const appLinking = {
   prefixes: [Linking.createURL("/"), "t3code://", "t3code-dev://", "t3code-preview://"],
+  config: navigationPathConfig,
 };
 
 const Navigation = createStaticNavigation(RootStack);
