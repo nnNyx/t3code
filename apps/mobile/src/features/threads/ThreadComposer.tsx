@@ -123,11 +123,14 @@ function ComposerSurface(props: {
   readonly style: ViewStyle;
   readonly isDarkMode: boolean;
 }) {
+  const shadowColor = useThemeColor("--color-drawer-shadow");
+  const surfaceColor = useThemeColor("--color-card-translucent");
+  const borderColor = useThemeColor("--color-border");
   // Drop shadow lives on a wrapper: `overflow: "hidden"` on the surface itself
   // (needed to clip content to the pill shape) would clip the shadow on iOS.
   const shadowStyle: ViewStyle = {
     borderRadius: props.style.borderRadius,
-    shadowColor: "#000000",
+    shadowColor,
     shadowOpacity: props.isDarkMode ? 0.35 : 0.12,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
@@ -155,9 +158,9 @@ function ComposerSurface(props: {
         style={[
           props.style,
           {
-            backgroundColor: props.isDarkMode ? "rgba(44,44,46,0.96)" : "rgba(255,255,255,0.96)",
+            backgroundColor: surfaceColor,
             borderWidth: 1,
-            borderColor: props.isDarkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
+            borderColor,
           },
         ]}
       >
@@ -223,18 +226,19 @@ const ComposerConnectionStatusPill = memo(function ComposerConnectionStatusPill(
   readonly status: ComposerStatusPillState;
 }) {
   const isReconnecting = props.status.kind !== "unavailable";
+  const activityTint = useThemeColor("--color-foreground-tertiary");
 
   return (
     <View className="items-center pb-2">
       <Pressable
         accessibilityRole="button"
         onPress={props.onPress}
-        className="max-w-full flex-row items-center gap-2 rounded-full bg-white/90 px-3 py-2 shadow-sm active:opacity-70 dark:bg-neutral-900/90"
+        className="max-w-full flex-row items-center gap-2 rounded-full bg-card px-3 py-2 shadow-sm active:opacity-70"
       >
         {isReconnecting ? (
-          <ActivityIndicator size="small" color="#8e8e93" />
+          <ActivityIndicator size="small" color={activityTint} />
         ) : (
-          <View className="h-2 w-2 rounded-full bg-red-500" />
+          <View className="h-2 w-2 rounded-full bg-danger-foreground" />
         )}
         <Text
           className="max-w-[260px] text-sm font-t3-bold leading-snug text-foreground"

@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { useMaterial3Theme, type Material3Theme } from "@pchmn/expo-material3-theme";
 import { Uniwind } from "uniwind";
 
 import {
@@ -17,6 +18,7 @@ import {
   type AppearancePreferences,
   type ResolvedAppearance,
 } from "../../../lib/appearancePreferences";
+import { BRAND_ACCENT_SOURCE, resolveMaterialAccentVariables } from "../../../lib/materialAccent";
 import { loadPreferences, savePreferencesPatch } from "../../../lib/storage";
 import { cacheTerminalFontSize } from "../../terminal/terminalUiState";
 
@@ -33,6 +35,21 @@ interface AppearancePreferencesContextValue {
 }
 
 const AppearancePreferencesContext = createContext<AppearancePreferencesContextValue | null>(null);
+
+function applyMaterialAccentVariables(materialTheme: Material3Theme) {
+  const currentTheme = Uniwind.currentTheme;
+  const variables = {
+    light: resolveMaterialAccentVariables(materialTheme.light, "light"),
+    dark: resolveMaterialAccentVariables(materialTheme.dark, "dark"),
+  } as const;
+
+  for (const theme of ["light", "dark"] as const) {
+    if (theme !== currentTheme) {
+      Uniwind.updateCSSVariables(theme, variables[theme]);
+    }
+  }
+  Uniwind.updateCSSVariables(currentTheme, variables[currentTheme]);
+}
 
 /**
  * Injects the scaled `--text-*` variables into Uniwind so every
@@ -52,6 +69,10 @@ function applyTextScaleVariables(baseFontSize: number) {
 }
 
 export function AppearancePreferencesProvider(props: { readonly children: ReactNode }) {
+  const { theme: materialTheme } = useMaterial3Theme({
+    colorFidelity: true,
+    fallbackSourceColor: BRAND_ACCENT_SOURCE,
+  });
   const [preferences, setPreferences] = useState<AppearancePreferences>(() =>
     resolveAppearancePreferences(null),
   );
@@ -87,6 +108,10 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
   useEffect(() => {
     applyTextScaleVariables(preferences.baseFontSize);
   }, [preferences.baseFontSize]);
+
+  useEffect(() => {
+    applyMaterialAccentVariables(materialTheme);
+  }, [materialTheme]);
 
   const updatePreferences = useCallback((patch: Partial<AppearancePreferences>) => {
     setPreferences((current) => {

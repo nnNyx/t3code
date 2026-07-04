@@ -25,21 +25,19 @@ export interface PendingUserInputCardProps {
 
 export function PendingUserInputCard(props: PendingUserInputCardProps) {
   return (
-    <View className="gap-2.5 rounded-[20px] border border-neutral-200 bg-neutral-100/80 p-4 dark:border-white/6 dark:bg-neutral-900/80">
-      <Text className="font-t3-bold text-2xs uppercase tracking-[1.1px] text-sky-700 dark:text-sky-300">
+    <View className="gap-2.5 rounded-[20px] border border-border bg-card p-4">
+      <Text className="font-t3-bold text-2xs uppercase tracking-[1.1px] text-accent-foreground">
         User input needed
       </Text>
-      <Text className="font-t3-bold text-lg text-neutral-950 dark:text-neutral-50">
-        Fill in the pending answers
-      </Text>
+      <Text className="font-t3-bold text-lg text-foreground">Fill in the pending answers</Text>
       {props.pendingUserInput.questions.map((question) => {
         const draft = props.drafts[question.id];
         return (
           <View key={question.id} className="gap-2 pt-1">
-            <Text className="font-t3-bold text-xs uppercase tracking-[1px] text-neutral-500 dark:text-neutral-500">
+            <Text className="font-t3-bold text-xs uppercase tracking-[1px] text-foreground-muted">
               {question.header}
             </Text>
-            <Text className="font-sans text-base leading-snug text-neutral-950 dark:text-neutral-50">
+            <Text className="font-sans text-base leading-snug text-foreground">
               {question.question}
             </Text>
             <View className="flex-row flex-wrap gap-2.5">
@@ -50,10 +48,8 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                   <Pressable
                     key={option.label}
                     className={cn(
-                      "rounded-full border px-3 py-2.5 ",
-                      selected
-                        ? "border-blue-300/50 bg-blue-50 dark:border-blue-400/28 dark:bg-blue-400/14"
-                        : "border-neutral-200 bg-white dark:border-white/6 dark:bg-neutral-950/70",
+                      "rounded-full border px-3 py-2.5",
+                      selected ? "border-accent-border bg-accent" : "border-border bg-card",
                     )}
                     onPress={() =>
                       props.onSelectOption(
@@ -66,9 +62,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                     <Text
                       className={cn(
                         "font-t3-bold text-sm",
-                        selected
-                          ? "text-sky-700 dark:text-sky-300"
-                          : "text-neutral-600 dark:text-neutral-300",
+                        selected ? "text-accent-foreground" : "text-foreground-secondary",
                       )}
                     >
                       {option.label}
@@ -83,7 +77,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                 props.onChangeCustomAnswer(props.pendingUserInput.requestId, question.id, value)
               }
               placeholder="Or type a custom answer"
-              className="min-h-[54px] rounded-2xl border border-neutral-200 bg-white px-3.5 py-3 font-sans text-base text-neutral-950 dark:border-white/8 dark:bg-neutral-950/70 dark:text-neutral-50"
+              className="min-h-[54px] rounded-2xl border border-input-border bg-input px-3.5 py-3 font-sans text-base text-foreground"
             />
           </View>
         );
@@ -91,14 +85,14 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
       <Pressable
         className={cn(
           "items-center justify-center rounded-2xl px-4 py-3.5",
-          props.answers ? "bg-blue-500" : "bg-neutral-200 dark:bg-neutral-700/60",
+          props.answers ? "bg-primary" : "bg-secondary",
         )}
         disabled={
           props.answers === null || props.respondingUserInputId === props.pendingUserInput.requestId
         }
         onPress={() => void props.onSubmit()}
       >
-        <Text className="font-t3-extrabold text-sm text-white">Submit answers</Text>
+        <Text className="font-t3-extrabold text-sm text-primary-foreground">Submit answers</Text>
       </Pressable>
     </View>
   );

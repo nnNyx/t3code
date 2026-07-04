@@ -198,14 +198,14 @@ const WorkingDurationPill = memo(function WorkingDurationPill(props: {
       exiting={FadeOut.duration(140)}
       style={{ flexShrink: 0 }}
     >
-      <View className="self-start rounded-full border border-neutral-200/80 bg-neutral-50/90 px-3 py-2 dark:border-white/[0.08] dark:bg-white/[0.04]">
+      <View className="self-start rounded-full border border-border bg-card px-3 py-2">
         <View className="flex-row items-center gap-2">
           <View className="flex-row items-center gap-1">
-            <View className="h-1.5 w-1.5 rounded-full bg-neutral-400 dark:bg-neutral-500" />
-            <View className="h-1.5 w-1.5 rounded-full bg-neutral-400/80 dark:bg-neutral-500/80" />
-            <View className="h-1.5 w-1.5 rounded-full bg-neutral-400/60 dark:bg-neutral-500/60" />
+            <View className="h-1.5 w-1.5 rounded-full bg-foreground-tertiary" />
+            <View className="h-1.5 w-1.5 rounded-full bg-foreground-tertiary opacity-80" />
+            <View className="h-1.5 w-1.5 rounded-full bg-foreground-tertiary opacity-60" />
           </View>
-          <Text className="font-t3-medium text-xs text-neutral-600 dark:text-neutral-400">
+          <Text className="font-t3-medium text-xs text-foreground-muted">
             Working for {durationLabel}
           </Text>
         </View>

@@ -255,10 +255,10 @@ export const PendingTaskListRow = memo(function PendingTaskListRow(props: {
 
   const statusPill = (
     <View
-      className="bg-zinc-500/12 dark:bg-zinc-500/16"
+      className="bg-subtle"
       style={{ borderRadius: 99, paddingHorizontal: 6, paddingVertical: 2 }}
     >
-      <Text className="text-3xs font-t3-bold text-zinc-600 dark:text-zinc-300">Pending</Text>
+      <Text className="text-3xs font-t3-bold text-foreground-muted">Pending</Text>
     </View>
   );
 
@@ -441,7 +441,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   const effectivePressedBackground = selected ? "rgba(255,255,255,0.16)" : pressedBackgroundColor;
   const effectiveStatus =
     selected && status
-      ? { ...status, pillClassName: "bg-white/20", textClassName: "text-white" }
+      ? { ...status, pillClassName: "bg-subtle", textClassName: "text-user-bubble-foreground" }
       : status;
 
   const handleDelete = useCallback(() => onDeleteThread(thread), [onDeleteThread, thread]);
@@ -497,7 +497,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
         {pr !== null ? (
           <Text
             className={`${compact ? "text-sm" : "text-xs"} font-t3-medium ${
-              selected ? "text-white" : pr.textClassName
+              selected ? "text-user-bubble-foreground" : pr.textClassName
             }`}
           >
             {pr.label}

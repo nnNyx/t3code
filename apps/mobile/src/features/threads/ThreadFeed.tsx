@@ -165,43 +165,6 @@ function MessageAttachmentImage(props: {
   );
 }
 
-const MARKDOWN_COLORS = {
-  light: {
-    body: "#111111",
-    strong: "#000000",
-    link: "#2563eb",
-    blockquoteBorder: "rgba(0, 0, 0, 0.08)",
-    blockquoteBackground: "rgba(0, 0, 0, 0.02)",
-    codeBackground: "rgba(0, 0, 0, 0.04)",
-    codeText: "#262626",
-    inlineCodeText: "#5f6368",
-    horizontalRule: "rgba(0, 0, 0, 0.08)",
-    userBody: "#ffffff",
-    userCodeBackground: "rgba(255, 255, 255, 0.22)",
-    userCodeText: "#ffffff",
-    userInlineCodeText: "rgba(255, 255, 255, 0.82)",
-    userFenceBackground: "rgba(0, 0, 0, 0.16)",
-    userFenceText: "#ffffff",
-  },
-  dark: {
-    body: "#e5e5e5",
-    strong: "#f5f5f5",
-    link: "#60a5fa",
-    blockquoteBorder: "rgba(255, 255, 255, 0.1)",
-    blockquoteBackground: "rgba(255, 255, 255, 0.03)",
-    codeBackground: "rgba(255, 255, 255, 0.06)",
-    codeText: "#e5e5e5",
-    inlineCodeText: "#b8bcc2",
-    horizontalRule: "rgba(255, 255, 255, 0.08)",
-    userBody: "#ffffff",
-    userCodeBackground: "rgba(255, 255, 255, 0.18)",
-    userCodeText: "#ffffff",
-    userInlineCodeText: "rgba(255, 255, 255, 0.82)",
-    userFenceBackground: "rgba(0, 0, 0, 0.28)",
-    userFenceText: "#ffffff",
-  },
-} as const;
-
 interface MarkdownStyleSets {
   readonly user: MarkdownStyleSet;
   readonly assistant: MarkdownStyleSet;
@@ -279,14 +242,12 @@ const MarkdownExternalLink = memo(function MarkdownExternalLink(props: {
 });
 
 function useReviewCommentColors(): ReviewCommentColors {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === "dark";
-  const background = isDark ? "#151515" : "#ffffff";
-  const border = isDark ? "#2a2a2a" : "#d7d7d7";
-  const mutedBackground = isDark ? "#242424" : "#f2f2f2";
-  const text = isDark ? "#f3f3f3" : "#111111";
-  const mutedText = isDark ? "#8f8f8f" : "#666666";
-  const codeBackground = isDark ? "#0f0f0f" : "#ffffff";
+  const background = useThemeColor("--color-card");
+  const border = useThemeColor("--color-border");
+  const mutedBackground = useThemeColor("--color-subtle");
+  const text = useThemeColor("--color-foreground");
+  const mutedText = useThemeColor("--color-foreground-muted");
+  const codeBackground = useThemeColor("--color-md-code-bg");
 
   return useMemo(
     () => ({
@@ -302,7 +263,6 @@ function useReviewCommentColors(): ReviewCommentColors {
 }
 
 function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSets {
-  const colorScheme = useColorScheme();
   const { appearance } = useAppearancePreferences();
   const markdownFontSizes = useMemo(
     () => resolveMarkdownFontSizes(appearance.baseFontSize),
@@ -312,25 +272,25 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
     () => resolveNativeMarkdownTypography(appearance.baseFontSize),
     [appearance.baseFontSize],
   );
-  const colors = MARKDOWN_COLORS[colorScheme === "dark" ? "dark" : "light"];
+  const markdownBodyColor = String(useThemeColor("--color-md-body"));
+  const markdownStrongColor = String(useThemeColor("--color-md-strong"));
+  const markdownLinkColor = String(useThemeColor("--color-md-link"));
+  const markdownBlockquoteBg = String(useThemeColor("--color-md-blockquote-bg"));
+  const markdownBlockquoteBorder = String(useThemeColor("--color-md-blockquote-border"));
+  const markdownCodeBg = String(useThemeColor("--color-md-code-bg"));
+  const markdownCodeText = String(useThemeColor("--color-md-code-text"));
+  const markdownHrColor = String(useThemeColor("--color-md-hr"));
+  const markdownUserBodyColor = String(useThemeColor("--color-user-bubble-foreground"));
+  const markdownUserBodyMutedColor = String(useThemeColor("--color-user-bubble-foreground-muted"));
+  const markdownUserCodeBg = String(useThemeColor("--color-md-user-code-bg"));
+  const markdownUserCodeText = String(useThemeColor("--color-md-user-code-text"));
+  const markdownUserFenceBg = String(useThemeColor("--color-md-user-fence-bg"));
+  const markdownUserFenceText = String(useThemeColor("--color-md-user-fence-text"));
   const inlineSkillForeground = String(useThemeColor("--color-inline-skill-foreground"));
 
   return useMemo(() => {
-    const markdownBodyColor = colors.body;
-    const markdownStrongColor = colors.strong;
-    const markdownLinkColor = colors.link;
-    const markdownBlockquoteBg = colors.blockquoteBackground;
-    const markdownBlockquoteBorder = colors.blockquoteBorder;
-    const markdownCodeBg = colors.codeBackground;
-    const markdownCodeText = colors.codeText;
-    const markdownInlineCodeText = colors.inlineCodeText;
-    const markdownHrColor = colors.horizontalRule;
-    const markdownUserBodyColor = colors.userBody;
-    const markdownUserCodeBg = colors.userCodeBackground;
-    const markdownUserCodeText = colors.userCodeText;
-    const markdownUserInlineCodeText = colors.userInlineCodeText;
-    const markdownUserFenceBg = colors.userFenceBackground;
-    const markdownUserFenceText = colors.userFenceText;
+    const markdownInlineCodeText = markdownBodyColor;
+    const markdownUserInlineCodeText = markdownUserBodyMutedColor;
 
     const baseTheme: PartialMarkdownTheme = {
       colors: {
@@ -648,8 +608,8 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           codeColor: markdownUserCodeText,
           codeBackgroundColor: markdownUserCodeBg,
           codeBlockBackgroundColor: markdownUserFenceBg,
-          fileTextColor: "#ffffff",
-          skillTextColor: "#f0abfc",
+          fileTextColor: markdownUserBodyColor,
+          skillTextColor: inlineSkillForeground,
           quoteMarkerColor: markdownUserBodyColor,
           dividerColor: markdownUserBodyColor,
           fontSize: nativeMarkdownTypography.fontSize,
@@ -692,7 +652,26 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         },
       },
     };
-  }, [colors, inlineSkillForeground, markdownFontSizes, nativeMarkdownTypography, onLinkPress]);
+  }, [
+    inlineSkillForeground,
+    markdownBlockquoteBg,
+    markdownBlockquoteBorder,
+    markdownBodyColor,
+    markdownCodeBg,
+    markdownCodeText,
+    markdownFontSizes,
+    markdownHrColor,
+    markdownLinkColor,
+    markdownStrongColor,
+    markdownUserBodyColor,
+    markdownUserBodyMutedColor,
+    markdownUserCodeBg,
+    markdownUserCodeText,
+    markdownUserFenceBg,
+    markdownUserFenceText,
+    nativeMarkdownTypography,
+    onLinkPress,
+  ]);
 }
 
 function renderFeedEntry(
@@ -726,7 +705,7 @@ function renderFeedEntry(
         accessibilityState={{ expanded: entry.expanded }}
         onPress={() => props.onToggleTurnFold(entry.turnId)}
         hitSlop={4}
-        className="mb-3 min-h-11 flex-row items-center gap-2 border-b border-neutral-200/80 px-2 dark:border-white/[0.08]"
+        className="mb-3 min-h-11 flex-row items-center gap-2 border-b border-border px-2"
       >
         <Text className="font-t3-medium text-sm tabular-nums text-foreground-muted">
           {entry.label}
@@ -800,14 +779,14 @@ function renderFeedEntry(
                   key={attachment.id}
                   environmentId={props.environmentId}
                   attachmentId={attachment.id}
-                  className="aspect-[1.3] w-full rounded-[14px] bg-white/15"
+                  className="aspect-[1.3] w-full rounded-[14px] bg-subtle"
                   onPressImage={props.onPressImage}
                 />
               );
             })}
           </View>
           <View className="mt-1 flex-row items-center justify-end gap-1 pr-0.5">
-            <Text className="font-t3-medium text-xs tabular-nums text-neutral-600 dark:text-neutral-400">
+            <Text className="font-t3-medium text-xs tabular-nums text-foreground-muted">
               {timestampLabel}
             </Text>
             {message.text.trim().length > 0 ? (
@@ -861,7 +840,7 @@ function renderFeedEntry(
               key={attachment.id}
               environmentId={props.environmentId}
               attachmentId={attachment.id}
-              className="mt-1.5 aspect-[1.3] w-full rounded-[18px] bg-neutral-200 dark:bg-neutral-800"
+              className="mt-1.5 aspect-[1.3] w-full rounded-[18px] bg-subtle"
               onPressImage={props.onPressImage}
             />
           );
@@ -875,7 +854,7 @@ function renderFeedEntry(
               buttonSize={28}
               iconSize={13}
             />
-            <Text className="font-t3-medium text-xs tabular-nums text-neutral-600 dark:text-neutral-400">
+            <Text className="font-t3-medium text-xs tabular-nums text-foreground-muted">
               {timestampLabel}
             </Text>
           </View>

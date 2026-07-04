@@ -40,6 +40,9 @@ export function FontSizeSliderRow(props: {
   const iconMuted = String(useThemeColor("--color-icon-muted"));
   const trackColor = String(useThemeColor("--color-secondary-border"));
   const fillColor = String(useThemeColor("--color-primary"));
+  const thumbColor = String(useThemeColor("--color-card"));
+  const thumbBorderColor = String(useThemeColor("--color-border"));
+  const thumbShadowColor = String(useThemeColor("--color-primary-shadow"));
 
   const latest = useRef(props);
   latest.current = props;
@@ -182,14 +185,15 @@ export function FontSizeSliderRow(props: {
               />
             </View>
             <Animated.View
-              className="absolute left-0 rounded-full bg-white"
+              className="absolute left-0 rounded-full"
               style={[
                 {
-                  borderColor: "rgba(0, 0, 0, 0.06)",
+                  backgroundColor: thumbColor,
+                  borderColor: thumbBorderColor,
                   borderWidth: 1,
                   height: THUMB_SIZE,
                   marginTop: -THUMB_SIZE / 2,
-                  shadowColor: "#000000",
+                  shadowColor: thumbShadowColor,
                   shadowOffset: { height: 2, width: 0 },
                   shadowOpacity: 0.18,
                   shadowRadius: 3,
