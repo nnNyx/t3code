@@ -63,6 +63,41 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
 
+// Free-Apple-ID device builds: T3CODE_IOS_PERSONAL_TEAM=1 swaps the bundle id
+// and drops the capabilities a personal team cannot sign (app groups, Sign in
+// with Apple, push, associated domains). Ported from upstream PR #3579.
+const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
+const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
+if (isIosPersonalTeamBuild && !personalTeamBundleIdentifier) {
+  throw new Error(
+    "T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID is required when T3CODE_IOS_PERSONAL_TEAM=1.",
+  );
+}
+const iosBundleIdentifier =
+  isIosPersonalTeamBuild && personalTeamBundleIdentifier
+    ? personalTeamBundleIdentifier
+    : variant.iosBundleIdentifier;
+
+const widgetsPlugin: [string, Record<string, unknown>] = [
+  "expo-widgets",
+  {
+    bundleIdentifier: `${iosBundleIdentifier}.widgets`,
+    groupIdentifier: `group.${iosBundleIdentifier}`,
+    enablePushNotifications: true,
+    // Agent activity can update many times an hour; without the
+    // frequent-updates entitlement iOS throttles the update budget sooner.
+    frequentUpdates: true,
+    widgets: [
+      {
+        name: "AgentActivity",
+        displayName: "Agent Activity",
+        description: "Shows the current state of active T3 Code agents.",
+        supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"],
+      },
+    ],
+  },
+];
+
 const config: ExpoConfig = {
   name: variant.appName,
   slug: "t3-code",
@@ -88,15 +123,20 @@ const config: ExpoConfig = {
   ios: {
     icon: variant.iosIcon,
     supportsTablet: true,
-    bundleIdentifier: variant.iosBundleIdentifier,
-    // Pin code signing to the T3 Tools team so non-interactive `expo run:ios`
-    // does not fall back to a personal team (which cannot sign app groups,
-    // Sign in with Apple, or push notification entitlements).
-    appleTeamId: "ARK85ZXQ4Z",
-    associatedDomains: [
-      `applinks:${variant.relyingParty}`,
-      `webcredentials:${variant.relyingParty}`,
-    ],
+    bundleIdentifier: iosBundleIdentifier,
+    ...(isIosPersonalTeamBuild
+      ? {}
+      : {
+          // Pin code signing to the T3 Tools team so non-interactive `expo run:ios`
+          // does not fall back to a personal team (which cannot sign app groups,
+          // Sign in with Apple, or push notification entitlements). Personal-team
+          // builds opt out explicitly via T3CODE_IOS_PERSONAL_TEAM=1.
+          appleTeamId: "ARK85ZXQ4Z",
+          associatedDomains: [
+            `applinks:${variant.relyingParty}`,
+            `webcredentials:${variant.relyingParty}`,
+          ],
+        }),
     infoPlist: {
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: true,
@@ -123,7 +163,7 @@ const config: ExpoConfig = {
   plugins: [
     "expo-font",
     "expo-secure-store",
-    ["@clerk/expo", { theme: "./clerk-theme.json" }],
+    ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild }],
     "expo-web-browser",
     [
       "expo-camera",
@@ -175,25 +215,9 @@ const config: ExpoConfig = {
     // would delete the asset catalog) and its xcodeproj mod creates the widget
     // target (which must exist before the compile phase can be attached).
     "./plugins/withWidgetLogoAsset.cjs",
-    [
-      "expo-widgets",
-      {
-        bundleIdentifier: `${variant.iosBundleIdentifier}.widgets`,
-        groupIdentifier: `group.${variant.iosBundleIdentifier}`,
-        enablePushNotifications: true,
-        // Agent activity can update many times an hour; without the
-        // frequent-updates entitlement iOS throttles the update budget sooner.
-        frequentUpdates: true,
-        widgets: [
-          {
-            name: "AgentActivity",
-            displayName: "Agent Activity",
-            description: "Shows the current state of active T3 Code agents.",
-            supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"],
-          },
-        ],
-      },
-    ],
+    ...(isIosPersonalTeamBuild
+      ? ["./plugins/withoutIosPersonalTeamCapabilities.cjs"]
+      : [widgetsPlugin]),
     "./plugins/withIosSceneLifecycle.cjs",
     "./plugins/withAndroidCleartextTraffic.cjs",
   ],
