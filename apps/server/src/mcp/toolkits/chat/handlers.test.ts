@@ -242,7 +242,7 @@ it.effect("chat_move_thread dispatches thread.meta.update with the target projec
       params: { threadId, projectId: projectB },
       dispatched,
     });
-    expect(result).toBeNull();
+    expect(result).toEqual({ ok: true });
     const commands = yield* Ref.get(dispatched);
     expect(commands).toHaveLength(1);
     expect(commands[0]).toMatchObject({

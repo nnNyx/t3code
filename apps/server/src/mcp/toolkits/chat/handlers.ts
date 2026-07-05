@@ -111,7 +111,7 @@ export const ChatToolkitHandlersLive = ChatToolkit.toLayer({
         commandId: CommandId.make(NodeCrypto.randomUUID()),
         threadId: ThreadId.make(input.threadId),
         projectId: ProjectId.make(input.projectId),
-      }).pipe(Effect.as(null)),
+      }).pipe(Effect.as({ ok: true as const })),
     ),
 
   chat_rename_thread: (input) =>
@@ -121,6 +121,6 @@ export const ChatToolkitHandlersLive = ChatToolkit.toLayer({
         commandId: CommandId.make(NodeCrypto.randomUUID()),
         threadId: ThreadId.make(input.threadId),
         title: input.title,
-      }).pipe(Effect.as(null)),
+      }).pipe(Effect.as({ ok: true as const })),
     ),
 });

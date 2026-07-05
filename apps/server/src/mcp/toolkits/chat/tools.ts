@@ -118,7 +118,8 @@ export const ChatMoveThreadTool = managementTool(
       threadId: describedNonEmptyString("Id of the thread to move."),
       projectId: describedNonEmptyString("Id of the destination project."),
     }),
-    success: Schema.Null,
+    // A bare null structuredContent fails strict MCP client schema validation.
+    success: Schema.Struct({ ok: Schema.Literal(true) }),
     failure: ChatToolFailure,
     dependencies,
   }).annotate(Tool.Title, "Move chat thread"),
@@ -132,7 +133,7 @@ export const ChatRenameThreadTool = managementTool(
       threadId: describedNonEmptyString("Id of the thread to rename."),
       title: describedNonEmptyString("New non-empty thread title."),
     }),
-    success: Schema.Null,
+    success: Schema.Struct({ ok: Schema.Literal(true) }),
     failure: ChatToolFailure,
     dependencies,
   }).annotate(Tool.Title, "Rename chat thread"),
