@@ -1,4 +1,6 @@
+import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import type {
+  EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceConfig,
   ProviderInstanceId,
@@ -6,6 +8,61 @@ import type {
   UnifiedSettings,
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+
+export interface ProviderSettingsEnvironmentInput {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+  readonly displayUrl: string | null;
+  readonly isPrimary: boolean;
+  readonly connectionPhase: EnvironmentConnectionPhase;
+}
+
+export interface ProviderSettingsSection {
+  readonly environmentId: EnvironmentId;
+  readonly title: string;
+  readonly isPrimary: boolean;
+}
+
+/**
+ * Group the providers page into one section per environment. Connected
+ * server environments come first — when the app is attached to a remote
+ * server, that server's providers are what the user came to check — with
+ * the app's own (primary/local) backend last. Environments that are in the
+ * catalog but not connected are skipped: their provider state is stale and
+ * their RPC actions would fail. With no connected servers the primary keeps
+ * the plain "Providers" title so single-environment usage is unchanged.
+ */
+export function deriveProviderSettingsSections(
+  environments: ReadonlyArray<ProviderSettingsEnvironmentInput>,
+): ReadonlyArray<ProviderSettingsSection> {
+  const primary = environments.find((environment) => environment.isPrimary);
+  const servers = environments.filter(
+    (environment) => !environment.isPrimary && environment.connectionPhase === "connected",
+  );
+
+  if (servers.length === 0) {
+    return primary
+      ? [{ environmentId: primary.environmentId, title: "Providers", isPrimary: true }]
+      : [];
+  }
+
+  return [
+    ...servers.map((server) => ({
+      environmentId: server.environmentId,
+      title: `Providers — ${server.label || server.displayUrl || "Server"}`,
+      isPrimary: false,
+    })),
+    ...(primary
+      ? [
+          {
+            environmentId: primary.environmentId,
+            title: "Providers — This app (local)",
+            isPrimary: true,
+          },
+        ]
+      : []),
+  ];
+}
 
 function collapseOtelSignalsUrl(input: {
   readonly tracesUrl: string;

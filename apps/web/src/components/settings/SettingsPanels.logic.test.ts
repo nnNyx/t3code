@@ -1,5 +1,6 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderInstanceConfig,
@@ -7,7 +8,9 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 import {
   buildProviderInstanceUpdatePatch,
+  deriveProviderSettingsSections,
   formatDiagnosticsDescription,
+  type ProviderSettingsEnvironmentInput,
 } from "./SettingsPanels.logic";
 
 describe("formatDiagnosticsDescription", () => {
@@ -45,6 +48,83 @@ describe("formatDiagnosticsDescription", () => {
         otlpMetricsEnabled: false,
       }),
     ).toBe("Local trace file.");
+  });
+});
+
+describe("deriveProviderSettingsSections", () => {
+  const localEnvironment: ProviderSettingsEnvironmentInput = {
+    environmentId: EnvironmentId.make("env-local"),
+    label: "This device",
+    displayUrl: "http://127.0.0.1:4100",
+    isPrimary: true,
+    connectionPhase: "connected",
+  };
+  const serverEnvironment: ProviderSettingsEnvironmentInput = {
+    environmentId: EnvironmentId.make("env-server"),
+    label: "Studio",
+    displayUrl: "https://studio.example.com",
+    isPrimary: false,
+    connectionPhase: "connected",
+  };
+
+  it("keeps the plain single-section layout when only the primary environment exists", () => {
+    expect(deriveProviderSettingsSections([localEnvironment])).toEqual([
+      { environmentId: localEnvironment.environmentId, title: "Providers", isPrimary: true },
+    ]);
+  });
+
+  it("lists connected servers first and labels the primary as the local app", () => {
+    expect(deriveProviderSettingsSections([localEnvironment, serverEnvironment])).toEqual([
+      {
+        environmentId: serverEnvironment.environmentId,
+        title: "Providers — Studio",
+        isPrimary: false,
+      },
+      {
+        environmentId: localEnvironment.environmentId,
+        title: "Providers — This app (local)",
+        isPrimary: true,
+      },
+    ]);
+  });
+
+  it("skips catalog servers that are not connected", () => {
+    expect(
+      deriveProviderSettingsSections([
+        localEnvironment,
+        { ...serverEnvironment, connectionPhase: "reconnecting" },
+      ]),
+    ).toEqual([
+      { environmentId: localEnvironment.environmentId, title: "Providers", isPrimary: true },
+    ]);
+  });
+
+  it("falls back to the display URL, then a generic label, for unnamed servers", () => {
+    const sections = deriveProviderSettingsSections([
+      localEnvironment,
+      { ...serverEnvironment, label: "" },
+      {
+        ...serverEnvironment,
+        environmentId: EnvironmentId.make("env-server-2"),
+        label: "",
+        displayUrl: null,
+      },
+    ]);
+    expect(sections.map((section) => section.title)).toEqual([
+      "Providers — https://studio.example.com",
+      "Providers — Server",
+      "Providers — This app (local)",
+    ]);
+  });
+
+  it("renders server sections even when no primary environment is present", () => {
+    expect(deriveProviderSettingsSections([serverEnvironment])).toEqual([
+      {
+        environmentId: serverEnvironment.environmentId,
+        title: "Providers — Studio",
+        isPrimary: false,
+      },
+    ]);
   });
 });
 

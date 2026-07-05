@@ -5,11 +5,13 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   defaultInstanceIdForDriver,
   type DesktopUpdateChannel,
+  type EnvironmentId,
   PROVIDER_DISPLAY_NAMES,
   ProviderDriverKind,
   type ProviderInstanceConfig,
   type ProviderInstanceId,
   type ScopedThreadRef,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
@@ -37,7 +39,12 @@ import { TraitsPicker } from "../chat/TraitsPicker";
 import { isElectron } from "../../env";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
 import { useTheme } from "../../hooks/useTheme";
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import {
+  useEnvironmentSettings,
+  usePrimarySettings,
+  useUpdateEnvironmentSettings,
+  useUpdatePrimarySettings,
+} from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import {
@@ -55,7 +62,7 @@ import {
   primaryServerProvidersAtom,
   serverEnvironment,
 } from "../../state/server";
-import { usePrimaryEnvironment } from "../../state/environments";
+import { useEnvironments } from "../../state/environments";
 import { useProjects } from "../../state/entities";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
@@ -77,6 +84,7 @@ import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
 import {
   buildProviderInstanceUpdatePatch,
+  deriveProviderSettingsSections,
   formatDiagnosticsDescription,
 } from "./SettingsPanels.logic";
 import {
@@ -111,6 +119,9 @@ const TIMESTAMP_FORMAT_LABELS = {
 } as const;
 
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
+
+// Stable identity so per-environment memos don't churn while providers load.
+const EMPTY_SERVER_PROVIDERS: ReadonlyArray<ServerProvider> = [];
 
 function withoutProviderInstanceKey<V>(
   record: Readonly<Record<ProviderInstanceId, V>> | undefined,
@@ -1005,10 +1016,45 @@ export function GeneralSettingsPanel() {
 }
 
 export function ProviderSettingsPanel() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
-  const serverProviders = useAtomValue(primaryServerProvidersAtom);
-  const primaryEnvironment = usePrimaryEnvironment();
+  const { environments } = useEnvironments();
+  const sections = useMemo(
+    () =>
+      deriveProviderSettingsSections(
+        environments.map((environment) => ({
+          environmentId: environment.environmentId,
+          label: environment.label,
+          displayUrl: environment.displayUrl,
+          isPrimary: environment.entry.target._tag === "PrimaryConnectionTarget",
+          connectionPhase: environment.connection.phase,
+        })),
+      ),
+    [environments],
+  );
+
+  return (
+    <SettingsPageContainer>
+      {sections.map((section) => (
+        <ProviderEnvironmentSection
+          key={section.environmentId}
+          environmentId={section.environmentId}
+          title={section.title}
+        />
+      ))}
+    </SettingsPageContainer>
+  );
+}
+
+function ProviderEnvironmentSection({
+  environmentId,
+  title,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly title: string;
+}) {
+  const settings = useEnvironmentSettings(environmentId);
+  const updateSettings = useUpdateEnvironmentSettings(environmentId);
+  const serverProviders =
+    useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
   const refreshServerProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
@@ -1053,14 +1099,9 @@ export function ProviderSettingsPanel() {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     setIsRefreshingProviders(true);
-    if (!primaryEnvironment) {
-      refreshingRef.current = false;
-      setIsRefreshingProviders(false);
-      return;
-    }
     void (async () => {
       const result = await refreshServerProviders({
-        environmentId: primaryEnvironment.environmentId,
+        environmentId,
         input: {},
       });
       refreshingRef.current = false;
@@ -1068,16 +1109,15 @@ export function ProviderSettingsPanel() {
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         console.warn("Failed to refresh providers", {
           operation: "refresh-providers",
-          environmentId: primaryEnvironment.environmentId,
+          environmentId,
           ...safeErrorLogAttributes(squashAtomCommandFailure(result)),
         });
       }
     })();
-  }, [primaryEnvironment, refreshServerProviders]);
+  }, [environmentId, refreshServerProviders]);
 
   const runProviderUpdate = useCallback(
     async (candidate: ProviderUpdateCandidate) => {
-      if (!primaryEnvironment) return;
       let started = false;
       setUpdatingProviderDrivers((previous) => {
         if (previous.has(candidate.driver)) {
@@ -1093,7 +1133,7 @@ export function ProviderSettingsPanel() {
       }
 
       const result = await updateProvider({
-        environmentId: primaryEnvironment.environmentId,
+        environmentId,
         input: {
           provider: candidate.driver,
           instanceId: candidate.instanceId,
@@ -1121,7 +1161,7 @@ export function ProviderSettingsPanel() {
         return next;
       });
     },
-    [primaryEnvironment, updateProvider],
+    [environmentId, updateProvider],
   );
 
   interface InstanceRow {
@@ -1228,6 +1268,10 @@ export function ProviderSettingsPanel() {
     });
   };
 
+  // Model preferences and favorites are client settings (device-local, keyed
+  // by instance id), so edits below land in this device's store no matter
+  // which environment section they came from. Everything else in this
+  // component is server-scoped and routes to `environmentId`.
   const updateProviderModelPreferences = (
     instanceId: ProviderInstanceId,
     next: {
@@ -1296,9 +1340,9 @@ export function ProviderSettingsPanel() {
   };
 
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection
-        title="Providers"
+        title={title}
         headerAction={
           <div className="flex items-center gap-1.5">
             <ProviderLastChecked lastCheckedAt={lastCheckedAt} />
@@ -1443,9 +1487,13 @@ export function ProviderSettingsPanel() {
       </SettingsSection>
 
       {isAddInstanceDialogOpen ? (
-        <AddProviderInstanceDialog open onOpenChange={setIsAddInstanceDialogOpen} />
+        <AddProviderInstanceDialog
+          open
+          onOpenChange={setIsAddInstanceDialogOpen}
+          environmentId={environmentId}
+        />
       ) : null}
-    </SettingsPageContainer>
+    </>
   );
 }
 
