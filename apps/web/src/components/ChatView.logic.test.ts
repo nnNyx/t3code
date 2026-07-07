@@ -14,6 +14,7 @@ import {
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
   resolveSendEnvMode,
+  shouldQueueMessageWhileBusy,
   shouldWriteThreadErrorToCurrentServerThread,
 } from "./ChatView.logic";
 
@@ -251,6 +252,40 @@ describe("resolveSendEnvMode", () => {
   it("keeps worktree mode only for git repositories", () => {
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: true })).toBe("worktree");
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: false })).toBe("local");
+  });
+});
+
+describe("shouldQueueMessageWhileBusy", () => {
+  it("queues a send (including one with attachments) while the session is running", () => {
+    // An attachment-bearing message must queue exactly like a text-only one:
+    // attachments no longer disqualify a send from the visible outbox.
+    expect(shouldQueueMessageWhileBusy({ isServerThread: true, sessionStatus: "running" })).toBe(
+      true,
+    );
+  });
+
+  it("queues while the session is starting", () => {
+    expect(shouldQueueMessageWhileBusy({ isServerThread: true, sessionStatus: "starting" })).toBe(
+      true,
+    );
+  });
+
+  it("does not queue when the thread is idle/ready", () => {
+    expect(shouldQueueMessageWhileBusy({ isServerThread: true, sessionStatus: "ready" })).toBe(
+      false,
+    );
+    expect(shouldQueueMessageWhileBusy({ isServerThread: true, sessionStatus: "idle" })).toBe(
+      false,
+    );
+    expect(shouldQueueMessageWhileBusy({ isServerThread: true, sessionStatus: undefined })).toBe(
+      false,
+    );
+  });
+
+  it("does not queue for local (non-server) draft threads", () => {
+    expect(shouldQueueMessageWhileBusy({ isServerThread: false, sessionStatus: "running" })).toBe(
+      false,
+    );
   });
 });
 

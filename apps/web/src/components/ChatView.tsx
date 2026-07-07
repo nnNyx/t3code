@@ -164,6 +164,7 @@ import { buildDraftThreadRouteParams } from "../threadRoutes";
 import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
+  hydrateComposerImagesFromAttachments,
   useComposerDraftStore,
   type DraftId,
 } from "../composerDraftStore";
@@ -214,6 +215,7 @@ import {
 } from "../state/threadOutbox";
 import { useThreadOutboxDelivery } from "../state/threadOutboxDelivery";
 import type { QueuedThreadMessage } from "@t3tools/client-runtime/state/thread-outbox-model";
+import type { DraftComposerImageAttachment } from "@t3tools/client-runtime/state/composer-attachment";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ComposerQueuedMessages } from "./chat/ComposerQueuedMessages";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
@@ -247,6 +249,7 @@ import {
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
   resolveSendEnvMode,
+  shouldQueueMessageWhileBusy,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
   waitForStartedServerThread,
@@ -2366,6 +2369,15 @@ function ChatViewContent(props: ChatViewProps) {
       const nextPrompt = `${existing}${separator}${queuedMessage.text}`;
       promptRef.current = nextPrompt;
       setComposerDraftPrompt(composerDraftTarget, nextPrompt);
+      // Restore any queued image attachments back into the composer. The queued
+      // row carries only a base64 `dataUrl` (no live File), so rebuild the
+      // File+preview from it; the dataUrl doubles as a valid preview URL.
+      if (queuedMessage.attachments.length > 0) {
+        const restoredImages = hydrateComposerImagesFromAttachments(queuedMessage.attachments);
+        if (restoredImages.length > 0) {
+          addComposerDraftImages(composerDraftTarget, restoredImages);
+        }
+      }
       // Carry the queued settings into the draft so a later send keeps what
       // the user originally picked for this message.
       if (queuedMessage.modelSelection !== undefined) {
@@ -2384,6 +2396,7 @@ function ChatViewContent(props: ChatViewProps) {
       scheduleComposerFocus();
     },
     [
+      addComposerDraftImages,
       composerDraftTarget,
       composerRef,
       dispatchingQueuedMessageId,
@@ -4160,18 +4173,38 @@ function ChatViewContent(props: ChatViewProps) {
       text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
     });
 
-    // While a turn is running (or starting), plain text sends queue into the
-    // visible outbox instead of steering immediately; the drain delivers them
-    // once the thread goes idle. Attachment sends keep steering right away —
-    // queued attachments are deliberately unsupported on web. Queued sends
-    // never touch the local dispatch latch or the optimistic timeline: those
-    // belong to actual dispatches only.
+    // While a turn is running (or starting), sends queue into the visible
+    // outbox instead of steering immediately; the drain delivers them once the
+    // thread goes idle. Attachment (image/screenshot) sends queue too — the
+    // queued row carries the base64 attachments so it stays editable and
+    // steerable, matching mobile. Queued sends never touch the local dispatch
+    // latch or the optimistic timeline: those belong to actual dispatches only.
     const activeSessionStatus = activeThread.session?.status;
-    const shouldQueueWhileBusy =
-      isServerThread &&
-      (activeSessionStatus === "running" || activeSessionStatus === "starting") &&
-      composerImagesSnapshot.length === 0;
+    const shouldQueueWhileBusy = shouldQueueMessageWhileBusy({
+      isServerThread,
+      sessionStatus: activeSessionStatus,
+    });
     if (shouldQueueWhileBusy) {
+      let queuedAttachments: DraftComposerImageAttachment[];
+      try {
+        queuedAttachments = await Promise.all(
+          composerImagesSnapshot.map(async (image) => ({
+            id: image.id,
+            previewUri: image.previewUrl,
+            type: "image" as const,
+            name: image.name,
+            mimeType: image.mimeType,
+            sizeBytes: image.sizeBytes,
+            dataUrl: await readFileAsDataUrl(image.file),
+          })),
+        );
+      } catch (error) {
+        setThreadError(
+          threadIdForSend,
+          error instanceof Error ? error.message : "Failed to read the image attachments.",
+        );
+        return;
+      }
       try {
         await enqueueThreadOutboxMessage({
           environmentId: activeThread.environmentId,
@@ -4179,7 +4212,7 @@ function ChatViewContent(props: ChatViewProps) {
           messageId: messageIdForSend,
           commandId: newCommandId(),
           text: outgoingMessageText,
-          attachments: [],
+          attachments: queuedAttachments,
           ...(ctxSelectedModel ? { modelSelection: ctxSelectedModelSelection } : {}),
           runtimeMode,
           interactionMode,

@@ -1,6 +1,7 @@
 import {
   type EnvironmentId,
   isProviderDriverKind,
+  type OrchestrationSessionStatus,
   ProjectId,
   type ModelSelection,
   type ProviderDriverKind,
@@ -191,6 +192,24 @@ export function resolveSendEnvMode(input: {
   isGitRepo: boolean;
 }): DraftThreadEnvMode {
   return input.isGitRepo ? input.requestedEnvMode : "local";
+}
+
+/**
+ * Decides whether a send should queue into the visible outbox instead of
+ * steering immediately. While a server thread's turn is running (or starting),
+ * sends queue and the drain delivers them once the thread goes idle.
+ *
+ * Attachment (image/screenshot) sends queue exactly like text ones: the queued
+ * row carries the attachments so it remains editable/steerable/deletable.
+ */
+export function shouldQueueMessageWhileBusy(input: {
+  isServerThread: boolean;
+  sessionStatus: OrchestrationSessionStatus | null | undefined;
+}): boolean {
+  return (
+    input.isServerThread &&
+    (input.sessionStatus === "running" || input.sessionStatus === "starting")
+  );
 }
 
 export function cloneComposerImageForRetry(

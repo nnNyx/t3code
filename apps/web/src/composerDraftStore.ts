@@ -2103,6 +2103,20 @@ function hydrateImagesFromPersisted(
   });
 }
 
+/**
+ * Rebuild live composer images (with reconstructed `File`s) from persisted /
+ * queued attachments that only carry a base64 `dataUrl`. Used to restore
+ * attachments into the composer draft when a queued outbox message is pulled
+ * back for editing — the queued row has no live `File`, only the `dataUrl`,
+ * which also doubles as a valid preview URL. Attachments whose `dataUrl` cannot
+ * be decoded are dropped.
+ */
+export function hydrateComposerImagesFromAttachments(
+  attachments: ReadonlyArray<PersistedComposerImageAttachment>,
+): ComposerImageAttachment[] {
+  return hydrateImagesFromPersisted(attachments);
+}
+
 function toHydratedThreadDraft(
   persistedDraft: PersistedComposerThreadDraftState,
 ): ComposerThreadDraftState {

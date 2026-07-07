@@ -65,6 +65,7 @@ import {
   markPromotedDraftThreadByRef,
   markPromotedDraftThreads,
   markPromotedDraftThreadsByRef,
+  hydrateComposerImagesFromAttachments,
   type ComposerImageAttachment,
   useComposerDraftStore,
   DraftId,
@@ -254,6 +255,44 @@ describe("composerDraftStore addImages", () => {
     const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
     expect(draft?.images.map((image) => image.id)).toEqual(["img-shared"]);
     expect(revokeSpy).not.toHaveBeenCalledWith("blob:shared");
+  });
+});
+
+describe("composerDraftStore edit-restore of queued attachments", () => {
+  const threadId = ThreadId.make("thread-edit-restore");
+  const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
+
+  beforeEach(() => {
+    resetComposerDraftStore();
+  });
+
+  it("restores queued image attachments into the composer draft via the dataUrl path", () => {
+    // A queued outbox message carries attachments with only a base64 dataUrl
+    // (no live File). Editing it must rebuild the composer images from that
+    // dataUrl so the attachment survives the round-trip.
+    const queuedAttachment = {
+      id: "queued-img-1",
+      previewUri: "file:///queued.png",
+      type: "image" as const,
+      name: "queued.png",
+      mimeType: "image/png",
+      sizeBytes: 1,
+      dataUrl: "data:image/png;base64,QQ==",
+    };
+
+    const restored = hydrateComposerImagesFromAttachments([queuedAttachment]);
+    expect(restored).toHaveLength(1);
+    expect(restored[0]?.id).toBe("queued-img-1");
+    // The dataUrl doubles as a valid preview URL for the restored image.
+    expect(restored[0]?.previewUrl).toBe("data:image/png;base64,QQ==");
+    expect(restored[0]?.file).toBeInstanceOf(File);
+
+    useComposerDraftStore.getState().addImages(threadRef, restored);
+
+    const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(draft?.images.map((image) => image.id)).toEqual(["queued-img-1"]);
+    expect(draft?.images[0]?.previewUrl).toBe("data:image/png;base64,QQ==");
+    expect(draft?.images[0]?.name).toBe("queued.png");
   });
 });
 
