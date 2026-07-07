@@ -18,10 +18,10 @@ export function EmptyState(props: {
         </Text>
         {props.actionLabel && props.onAction ? (
           <Pressable
-            className="mt-5 rounded-full bg-primary px-5 py-3 active:opacity-70"
+            className="mt-5 self-center rounded-full bg-primary px-5 py-3 active:opacity-70"
             onPress={props.onAction}
           >
-            <Text className="text-sm font-t3-bold text-primary-foreground">
+            <Text className="text-center text-sm font-t3-bold text-primary-foreground">
               {props.actionLabel}
             </Text>
           </Pressable>
