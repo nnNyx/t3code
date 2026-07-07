@@ -208,6 +208,7 @@ const config: ExpoConfig = {
         },
       },
     ],
+    "./plugins/withAndroidGradleHeap.cjs",
     "./plugins/withIosCocoaPodsUuidCache.cjs",
     // Must be listed BEFORE expo-widgets: same-type mods run last-registered-
     // first, so registering earlier makes this plugin's mods run AFTER
