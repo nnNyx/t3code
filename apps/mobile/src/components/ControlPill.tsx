@@ -16,9 +16,12 @@ export function ControlPill(props: {
   readonly onPress?: () => void;
   readonly variant?: "circle" | "pill" | "primary" | "danger";
   readonly disabled?: boolean;
+  /** Tighter 40px circle (Material composer) instead of the default 44px. */
+  readonly compact?: boolean;
 }) {
   const variant = props.variant ?? "circle";
   const isAndroid = Platform.OS === "android";
+  const circleSize = props.compact ? "h-10 w-10" : "h-11 w-11";
 
   const iconColor = useThemeColor("--color-icon");
   const iconSubtle = useThemeColor("--color-icon-subtle");
@@ -42,7 +45,7 @@ export function ControlPill(props: {
     variant === "circle" || variant === "danger" || (variant === "primary" && !props.label);
   const containerClassName = cn(
     isCircle
-      ? "h-11 w-11 items-center justify-center rounded-full"
+      ? `${circleSize} items-center justify-center rounded-full`
       : variant === "primary"
         ? "h-11 flex-row items-center justify-center gap-2 rounded-full px-5"
         : "h-11 flex-row items-center justify-center gap-2 rounded-full px-3.5",

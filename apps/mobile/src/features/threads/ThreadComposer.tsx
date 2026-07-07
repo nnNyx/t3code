@@ -74,7 +74,7 @@ import { ThreadComposerQueuedMessages } from "./ThreadComposerQueuedMessages";
  * Android runs the tighter Material 3 layout (44px send button + 3px pill pad =
  * 50 pill, + 4px outer top/bottom = 58); iOS keeps its taller liquid-glass pill.
  */
-export const COMPOSER_COLLAPSED_CHROME = Platform.OS === "android" ? 58 : 60;
+export const COMPOSER_COLLAPSED_CHROME = Platform.OS === "android" ? 50 : 60;
 
 /**
  * Height of the expanded composer (card + toolbar + vertical padding, excluding safe-area inset).
@@ -83,7 +83,7 @@ export const COMPOSER_COLLAPSED_CHROME = Platform.OS === "android" ? 58 : 60;
  * Android: card (60 editor + 2×10 pad = 80) + toolbar (8 + 44 + 8 = 60) + outer
  * (2×8 = 16) = 156. iOS keeps its taller card.
  */
-export const COMPOSER_EXPANDED_CHROME = Platform.OS === "android" ? 156 : 174;
+export const COMPOSER_EXPANDED_CHROME = Platform.OS === "android" ? 138 : 174;
 
 export interface ThreadComposerProps {
   readonly draftMessage: string;
@@ -747,7 +747,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   // Android's compact Material layout hugs the bottom edge a little tighter than
   // the roomier iOS liquid-glass composer.
   const isAndroid = Platform.OS === "android";
-  const collapsedOuterPadding = isAndroid ? 4 : 6;
+  const collapsedOuterPadding = isAndroid ? 3 : 6;
 
   return (
     <Animated.View
@@ -806,22 +806,22 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           style={
             isExpanded
               ? {
-                  // Android: smaller M3 radius + tighter card padding.
-                  borderRadius: isAndroid ? 16 : 20,
+                  // Android: smaller M3 radius + tight card padding.
+                  borderRadius: isAndroid ? 14 : 20,
                   overflow: "hidden" as const,
                   paddingHorizontal: isAndroid ? 12 : 14,
-                  paddingVertical: isAndroid ? 10 : 12,
+                  paddingVertical: isAndroid ? 8 : 12,
                 }
               : {
                   // Android: Material rounded field instead of the full 999 pill,
-                  // with tighter padding so the collapsed bar is visibly shorter.
-                  borderRadius: isAndroid ? 24 : 999,
+                  // with tight padding so the collapsed bar is compact.
+                  borderRadius: isAndroid ? 20 : 999,
                   overflow: "hidden" as const,
                   flexDirection: "row" as const,
                   alignItems: "center" as const,
                   paddingLeft: isAndroid ? 14 : 18,
-                  paddingRight: isAndroid ? 6 : 5,
-                  paddingVertical: isAndroid ? 3 : 5,
+                  paddingRight: isAndroid ? 5 : 5,
+                  paddingVertical: isAndroid ? 2 : 5,
                 }
           }
         >
@@ -861,7 +861,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                   ? {
                       // Android: shorter editor so the expanded card doesn't
                       // dominate the screen.
-                      minHeight: isAndroid ? 60 : 80,
+                      minHeight: isAndroid ? 46 : 80,
                       maxHeight: isAndroid ? 140 : 160,
                       paddingHorizontal: 4,
                       paddingVertical: 4,
@@ -917,12 +917,14 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                 <ControlPill
                   icon={{ ios: "stop.fill", android: "stop" }}
                   variant="danger"
+                  compact={isAndroid}
                   onPress={props.onStopThread}
                 />
               ) : (
                 <ControlPill
                   icon={{ ios: "arrow.up", android: "arrow_upward" }}
                   variant="primary"
+                  compact={isAndroid}
                   disabled={!canSend}
                   onPress={handleSend}
                 />
