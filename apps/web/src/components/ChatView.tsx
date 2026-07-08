@@ -5457,7 +5457,12 @@ function ChatViewContent(props: ChatViewProps) {
                       composerImagesRef={composerImagesRef}
                       composerTerminalContextsRef={composerTerminalContextsRef}
                       composerElementContextsRef={composerElementContextsRef}
+                      queuedHeadMessage={activeQueuedMessages[0] ?? null}
+                      queueSteerEnabled={!activeEnvironmentUnavailable}
                       onSend={onSend}
+                      onSteerQueuedMessage={(message) => void onSteerQueuedMessage(message)}
+                      onEditQueuedMessage={(message) => void onEditQueuedMessage(message)}
+                      onDeleteQueuedMessage={(message) => void onDeleteQueuedMessage(message)}
                       onInterrupt={onInterrupt}
                       onImplementPlanInNewThread={onImplementPlanInNewThread}
                       onRespondToApproval={onRespondToApproval}

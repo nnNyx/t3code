@@ -8,6 +8,7 @@ import {
   isCollapsedCursorAdjacentToInlineToken,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
+  resolveComposerQueueKeyAction,
 } from "./composer-logic";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
@@ -346,5 +347,64 @@ describe("parseStandaloneComposerSlashCommand", () => {
 
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
+  });
+});
+
+describe("resolveComposerQueueKeyAction", () => {
+  const base = {
+    isComposerEmpty: true,
+    hasQueuedMessages: true,
+    shiftKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+    isComposing: false,
+  } as const;
+
+  it("steers on Enter when empty with a queue", () => {
+    expect(resolveComposerQueueKeyAction({ ...base, key: "Enter" })).toBe("steer");
+  });
+
+  it("edits on ArrowUp when empty with a queue", () => {
+    expect(resolveComposerQueueKeyAction({ ...base, key: "ArrowUp" })).toBe("edit");
+  });
+
+  it("deletes on Delete or Backspace when empty with a queue", () => {
+    expect(resolveComposerQueueKeyAction({ ...base, key: "Delete" })).toBe("delete");
+    expect(resolveComposerQueueKeyAction({ ...base, key: "Backspace" })).toBe("delete");
+  });
+
+  it("does nothing when the composer has text", () => {
+    expect(
+      resolveComposerQueueKeyAction({ ...base, isComposerEmpty: false, key: "Enter" }),
+    ).toBeNull();
+    expect(
+      resolveComposerQueueKeyAction({ ...base, isComposerEmpty: false, key: "ArrowUp" }),
+    ).toBeNull();
+    expect(
+      resolveComposerQueueKeyAction({ ...base, isComposerEmpty: false, key: "Backspace" }),
+    ).toBeNull();
+  });
+
+  it("does nothing when the queue is empty", () => {
+    expect(
+      resolveComposerQueueKeyAction({ ...base, hasQueuedMessages: false, key: "Enter" }),
+    ).toBeNull();
+  });
+
+  it("ignores shift+enter (newline) and other modified keys", () => {
+    expect(resolveComposerQueueKeyAction({ ...base, shiftKey: true, key: "Enter" })).toBeNull();
+    expect(resolveComposerQueueKeyAction({ ...base, ctrlKey: true, key: "Enter" })).toBeNull();
+    expect(resolveComposerQueueKeyAction({ ...base, metaKey: true, key: "ArrowUp" })).toBeNull();
+    expect(resolveComposerQueueKeyAction({ ...base, altKey: true, key: "Delete" })).toBeNull();
+  });
+
+  it("ignores IME composition", () => {
+    expect(resolveComposerQueueKeyAction({ ...base, isComposing: true, key: "Enter" })).toBeNull();
+  });
+
+  it("ignores unrelated keys", () => {
+    expect(resolveComposerQueueKeyAction({ ...base, key: "ArrowDown" })).toBeNull();
+    expect(resolveComposerQueueKeyAction({ ...base, key: "Tab" })).toBeNull();
   });
 });

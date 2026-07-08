@@ -27,6 +27,7 @@ import {
   KEY_TAB_COMMAND,
   COMMAND_PRIORITY_HIGH,
   KEY_BACKSPACE_COMMAND,
+  KEY_DELETE_COMMAND,
   $getRoot,
   HISTORY_MERGE_TAG,
   DecoratorNode,
@@ -886,27 +887,20 @@ interface ComposerPromptEditorProps {
     cursorAdjacentToMention: boolean,
     terminalContextIds: string[],
   ) => void;
-  onCommandKeyDown?: (
-    key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
-    event: KeyboardEvent,
-  ) => boolean;
+  onCommandKeyDown?: (key: ComposerCommandKey, event: KeyboardEvent) => boolean;
   onPaste: React.ClipboardEventHandler<HTMLElement>;
   editorRef: React.RefObject<ComposerPromptEditorHandle | null>;
 }
 
+type ComposerCommandKey = "ArrowDown" | "ArrowUp" | "Enter" | "Tab" | "Delete" | "Backspace";
+
 function ComposerCommandKeyPlugin(props: {
-  onCommandKeyDown?: (
-    key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
-    event: KeyboardEvent,
-  ) => boolean;
+  onCommandKeyDown?: (key: ComposerCommandKey, event: KeyboardEvent) => boolean;
 }) {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
-    const handleCommand = (
-      key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
-      event: KeyboardEvent | null,
-    ): boolean => {
+    const handleCommand = (key: ComposerCommandKey, event: KeyboardEvent | null): boolean => {
       if (!props.onCommandKeyDown || !event) {
         return false;
       }
@@ -944,12 +938,27 @@ function ComposerCommandKeyPlugin(props: {
       (event) => handleCommand("Tab", event),
       COMMAND_PRIORITY_HIGH,
     );
+    // Delete / Backspace on an empty composer drop the head queued message.
+    // Returns false when the composer has content, letting the default editor
+    // deletion (and ComposerInlineTokenBackspacePlugin) handle it normally.
+    const unregisterDelete = editor.registerCommand(
+      KEY_DELETE_COMMAND,
+      (event) => handleCommand("Delete", event),
+      COMMAND_PRIORITY_HIGH,
+    );
+    const unregisterBackspace = editor.registerCommand(
+      KEY_BACKSPACE_COMMAND,
+      (event) => handleCommand("Backspace", event),
+      COMMAND_PRIORITY_HIGH,
+    );
 
     return () => {
       unregisterArrowDown();
       unregisterArrowUp();
       unregisterEnter();
       unregisterTab();
+      unregisterDelete();
+      unregisterBackspace();
     };
   }, [editor, props]);
 

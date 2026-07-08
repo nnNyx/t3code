@@ -278,3 +278,44 @@ export function replaceTextRange(
   const nextText = `${text.slice(0, safeStart)}${replacement}${text.slice(safeEnd)}`;
   return { text: nextText, cursor: safeStart + replacement.length };
 }
+
+/**
+ * Keyboard action to run against the head (oldest) queued message when the
+ * composer editor is empty. Lets the user drive the outbox from the keyboard
+ * instead of the Steer / Edit / Delete buttons:
+ *   - Enter (no shift): steer the head queued message ("double enter").
+ *   - ArrowUp: pull the head queued message back into the composer (edit).
+ *   - Delete / Backspace: drop the head queued message.
+ * Only fires on a trimmed-empty editor with at least one queued message, and
+ * never with ctrl/meta/alt held (shift is reserved for shift+enter newline).
+ */
+export type ComposerQueueKeyAction = "steer" | "edit" | "delete";
+
+export function resolveComposerQueueKeyAction(params: {
+  key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab" | "Delete" | "Backspace";
+  isComposerEmpty: boolean;
+  hasQueuedMessages: boolean;
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+  isComposing: boolean;
+}): ComposerQueueKeyAction | null {
+  if (!params.isComposerEmpty || !params.hasQueuedMessages) return null;
+  if (params.isComposing) return null;
+  // Reserve modified keys for their normal behavior. Shift is only meaningful
+  // for Enter (shift+enter = newline), so a held shift never triggers a queue
+  // action either.
+  if (params.ctrlKey || params.metaKey || params.altKey || params.shiftKey) return null;
+  switch (params.key) {
+    case "Enter":
+      return "steer";
+    case "ArrowUp":
+      return "edit";
+    case "Delete":
+    case "Backspace":
+      return "delete";
+    default:
+      return null;
+  }
+}

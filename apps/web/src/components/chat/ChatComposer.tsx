@@ -41,7 +41,9 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   replaceTextRange,
+  resolveComposerQueueKeyAction,
 } from "../../composer-logic";
+import type { QueuedThreadMessage } from "@t3tools/client-runtime/state/thread-outbox-model";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import {
   type ComposerImageAttachment,
@@ -504,8 +506,16 @@ export interface ChatComposerProps {
   composerElementContextsRef: React.RefObject<ElementContextDraft[]>;
   composerRef: React.RefObject<ChatComposerHandle | null>;
 
+  // Queue (outbox) keyboard shortcuts. Operate on the head (oldest) queued
+  // message when the composer editor is empty.
+  queuedHeadMessage: QueuedThreadMessage | null;
+  queueSteerEnabled: boolean;
+
   // Callbacks
   onSend: (e?: { preventDefault: () => void }) => void;
+  onSteerQueuedMessage: (message: QueuedThreadMessage) => void;
+  onEditQueuedMessage: (message: QueuedThreadMessage) => void;
+  onDeleteQueuedMessage: (message: QueuedThreadMessage) => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
@@ -589,7 +599,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerImagesRef,
     composerTerminalContextsRef,
     composerElementContextsRef,
+    queuedHeadMessage,
+    queueSteerEnabled,
     onSend,
+    onSteerQueuedMessage,
+    onEditQueuedMessage,
+    onDeleteQueuedMessage,
     onInterrupt,
     onImplementPlanInNewThread,
     onRespondToApproval,
@@ -1725,12 +1740,42 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Callbacks: command key
   // ------------------------------------------------------------------
   const onComposerCommandKey = (
-    key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
+    key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab" | "Delete" | "Backspace",
     event: KeyboardEvent,
   ) => {
     if (key === "Tab" && event.shiftKey) {
       toggleInteractionMode();
       return true;
+    }
+    // Keyboard shortcuts for the visible outbox: with an empty composer editor
+    // and a non-empty queue, Enter steers / ArrowUp edits / Delete|Backspace
+    // removes the head (oldest) queued message. An empty editor can never have
+    // an active trigger menu, so this stays clear of the menu navigation below.
+    if (queuedHeadMessage) {
+      const editorValue = composerEditorRef.current?.readSnapshot().value ?? promptRef.current;
+      const queueAction = resolveComposerQueueKeyAction({
+        key,
+        isComposerEmpty: editorValue.trim().length === 0,
+        hasQueuedMessages: true,
+        shiftKey: event.shiftKey,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        altKey: event.altKey,
+        isComposing: event.isComposing,
+      });
+      if (queueAction) {
+        // Always consume (preventDefault via the editor plugin) so an empty
+        // Enter never falls through to submit an empty message. Steering still
+        // respects the same connection gate that disables the Steer button.
+        if (queueAction === "steer") {
+          if (queueSteerEnabled) onSteerQueuedMessage(queuedHeadMessage);
+        } else if (queueAction === "edit") {
+          onEditQueuedMessage(queuedHeadMessage);
+        } else {
+          onDeleteQueuedMessage(queuedHeadMessage);
+        }
+        return true;
+      }
     }
     const { trigger } = resolveActiveComposerTrigger();
     const menuIsActive = composerMenuOpenRef.current || trigger !== null;
