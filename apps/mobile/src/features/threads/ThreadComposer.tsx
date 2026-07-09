@@ -751,6 +751,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
 
   return (
     <Animated.View
+      className="px-4"
       layout={COMPOSER_LAYOUT_TRANSITION}
       style={{
         paddingHorizontal: 16,
@@ -762,21 +763,12 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       }}
     >
       <Animated.View
-        className="w-full"
+        className="relative w-full self-center"
         layout={COMPOSER_LAYOUT_TRANSITION}
-        style={{ alignSelf: "center", maxWidth: props.contentMaxWidth, position: "relative" }}
+        style={{ maxWidth: props.contentMaxWidth }}
       >
         {composerTrigger && composerMenuItems.length > 0 ? (
-          <View
-            style={{
-              position: "absolute",
-              bottom: "100%",
-              left: 0,
-              right: 0,
-              marginBottom: 8,
-              zIndex: 10,
-            }}
-          >
+          <View className="absolute inset-x-0 bottom-full z-10 mb-2">
             <ComposerCommandPopover
               items={composerMenuItems}
               triggerKind={composerTrigger.kind}
@@ -828,9 +820,9 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           {/* Attachment strip — inside the card, above the text input */}
           {isExpanded ? (
             <Animated.View
+              className={props.draftAttachments.length > 0 ? "pb-2.5" : undefined}
               entering={FadeIn.duration(160)}
               exiting={FadeOut.duration(120)}
-              style={{ paddingBottom: props.draftAttachments.length > 0 ? 10 : 0 }}
             >
               <ComposerAttachmentStrip
                 attachments={props.draftAttachments}
@@ -840,7 +832,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
             </Animated.View>
           ) : null}
 
-          <View style={isExpanded ? undefined : { flex: 1, minWidth: 0 }}>
+          <View className={isExpanded ? undefined : "min-w-0 flex-1"}>
             <ComposerEditor
               ref={inputRef}
               multiline
@@ -873,37 +865,22 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               textStyle={{
                 ...bodyText,
                 color: foregroundColor,
-                fontFamily: "DMSans_400Regular",
               }}
             />
           </View>
           {!isExpanded && props.draftAttachments.length > 0 ? (
-            <View style={{ flexDirection: "row", gap: 4, paddingLeft: 4 }}>
+            <View className="flex-row gap-1 pl-1">
               {props.draftAttachments.slice(0, 3).map((image) => (
                 <Pressable key={image.id} onPress={() => onPressImage(image.previewUri)}>
                   <Image
                     source={{ uri: image.previewUri }}
-                    className="bg-subtle"
-                    style={{
-                      width: 30,
-                      height: 30,
-                      borderRadius: 8,
-                    }}
+                    className="size-[30px] rounded-lg bg-subtle"
                     resizeMode="cover"
                   />
                 </Pressable>
               ))}
               {props.draftAttachments.length > 3 ? (
-                <View
-                  className="bg-subtle-strong"
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: 8,
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
+                <View className="size-[30px] items-center justify-center rounded-lg bg-subtle-strong">
                   <Text className="text-foreground-muted text-2xs font-t3-bold">
                     +{props.draftAttachments.length - 3}
                   </Text>

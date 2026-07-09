@@ -1,12 +1,7 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, use, useCallback, useEffect, useMemo, type ReactNode } from "react";
+
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { AsyncResult } from "effect/unstable/reactivity";
 
 import { useMaterial3Theme, type Material3Theme } from "@pchmn/expo-material3-theme";
 import { Uniwind } from "uniwind";
@@ -19,7 +14,7 @@ import {
   type ResolvedAppearance,
 } from "../../../lib/appearancePreferences";
 import { BRAND_ACCENT_SOURCE, resolveMaterialAccentVariables } from "../../../lib/materialAccent";
-import { loadPreferences, savePreferencesPatch } from "../../../lib/storage";
+import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../../state/preferences";
 import { cacheTerminalFontSize } from "../../terminal/terminalUiState";
 
 interface AppearancePreferencesContextValue {
@@ -73,59 +68,32 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
     colorFidelity: true,
     fallbackSourceColor: BRAND_ACCENT_SOURCE,
   });
-  const [preferences, setPreferences] = useState<AppearancePreferences>(() =>
-    resolveAppearancePreferences(null),
+  const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const preferences = useMemo(
+    () =>
+      resolveAppearancePreferences(
+        AsyncResult.isSuccess(preferencesResult) ? preferencesResult.value : null,
+      ),
+    [preferencesResult],
   );
-  const [isReady, setIsReady] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    void loadPreferences()
-      .then((stored) => {
-        if (cancelled) {
-          return;
-        }
-
-        const resolved = resolveAppearancePreferences(stored);
-        setPreferences(resolved);
-        cacheTerminalFontSize(resolveAppearance(resolved).terminalFontSize);
-        setIsReady(true);
-      })
-      .catch(() => {
-        if (cancelled) {
-          return;
-        }
-
-        setIsReady(true);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const isReady = AsyncResult.isSuccess(preferencesResult) && !preferencesResult.waiting;
 
   useEffect(() => {
     applyTextScaleVariables(preferences.baseFontSize);
-  }, [preferences.baseFontSize]);
+    cacheTerminalFontSize(resolveAppearance(preferences).terminalFontSize);
+  }, [preferences]);
 
   useEffect(() => {
     applyMaterialAccentVariables(materialTheme);
   }, [materialTheme]);
 
-  const updatePreferences = useCallback((patch: Partial<AppearancePreferences>) => {
-    setPreferences((current) => {
-      const next = resolveAppearancePreferences({ ...current, ...patch });
-      cacheTerminalFontSize(resolveAppearance(next).terminalFontSize);
-      void savePreferencesPatch({
-        baseFontSize: next.baseFontSize,
-        terminalFontSize: next.terminalFontSize,
-        codeFontSize: next.codeFontSize,
-        codeWordBreak: next.codeWordBreak,
-      }).catch(() => undefined);
-      return next;
-    });
-  }, []);
+  const updatePreferences = useCallback(
+    (patch: Partial<AppearancePreferences>) => {
+      savePreferences(patch);
+    },
+    [savePreferences],
+  );
 
   const setBaseFontSize = useCallback(
     (value: number) => {
@@ -175,7 +143,7 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
 }
 
 export function useAppearancePreferences(): AppearancePreferencesContextValue {
-  const context = useContext(AppearancePreferencesContext);
+  const context = use(AppearancePreferencesContext);
   if (!context) {
     throw new Error("useAppearancePreferences must be used within AppearancePreferencesProvider");
   }

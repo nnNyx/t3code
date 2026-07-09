@@ -15,9 +15,10 @@ export function SettingsSection(props: {
       <Text className="px-2 text-sm font-t3-medium text-foreground-muted">{props.title}</Text>
       <View
         className={
-          showCard ? "overflow-hidden rounded-[28px] bg-card" : "overflow-hidden rounded-[28px]"
+          showCard
+            ? "overflow-hidden rounded-[28px] border-continuous bg-card"
+            : "overflow-hidden rounded-[28px] border-continuous"
         }
-        style={{ borderCurve: "continuous" }}
       >
         {props.children}
       </View>
