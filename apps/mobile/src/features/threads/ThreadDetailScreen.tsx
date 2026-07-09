@@ -38,6 +38,12 @@ import type { QueuedThreadMessage } from "../../state/thread-outbox";
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { PendingUserInputCard } from "./PendingUserInputCard";
 import {
+  DEFAULT_HAPTICS_GATE_CONFIG,
+  INITIAL_HAPTICS_GATE_STATE,
+  stepHapticsGate,
+  type HapticsGateState,
+} from "./streamingHapticsGate";
+import {
   COMPOSER_COLLAPSED_CHROME,
   COMPOSER_EXPANDED_CHROME,
   ThreadComposer,
@@ -127,52 +133,44 @@ function latestStreamingAssistantMessage(
 }
 
 function useStreamingHaptics(threadId: ThreadId, feed: ReadonlyArray<ThreadFeedEntry>) {
-  const lastStreamingAssistantRef = useRef<{
-    readonly id: string;
-    readonly textLength: number;
-  } | null>(null);
-  const lastStreamHapticAtRef = useRef(0);
-  const hydratedRef = useRef(false);
-  const previousThreadIdRef = useRef(threadId);
+  const gateStateRef = useRef<HapticsGateState>(INITIAL_HAPTICS_GATE_STATE);
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (previousThreadIdRef.current !== threadId) {
-      previousThreadIdRef.current = threadId;
-      hydratedRef.current = false;
+    const clearSettleTimer = () => {
+      if (settleTimerRef.current !== null) {
+        clearTimeout(settleTimerRef.current);
+        settleTimerRef.current = null;
+      }
+    };
+
+    const latest = latestStreamingAssistantMessage(feed);
+    const step = stepHapticsGate(gateStateRef.current, {
+      type: "update",
+      threadId: String(threadId),
+      latest,
+      now: Date.now(),
+    });
+    gateStateRef.current = step.state;
+
+    if (step.fireHaptic) {
+      void Haptics.selectionAsync();
     }
 
-    const latestStreamingMessage = latestStreamingAssistantMessage(feed);
-
-    if (!hydratedRef.current) {
-      hydratedRef.current = true;
-      lastStreamingAssistantRef.current = latestStreamingMessage;
-      return;
+    // (Re)arm the settle timer while catching up: once the feed stays quiet for
+    // the settle window we flip to live and later growth buzzes as designed.
+    clearSettleTimer();
+    if (step.hydrating) {
+      settleTimerRef.current = setTimeout(() => {
+        settleTimerRef.current = null;
+        gateStateRef.current = stepHapticsGate(gateStateRef.current, {
+          type: "settle",
+          now: Date.now(),
+        }).state;
+      }, DEFAULT_HAPTICS_GATE_CONFIG.settleMs);
     }
 
-    if (!latestStreamingMessage) {
-      lastStreamingAssistantRef.current = null;
-      return;
-    }
-
-    const previousStreamingMessage = lastStreamingAssistantRef.current;
-    lastStreamingAssistantRef.current = latestStreamingMessage;
-
-    const isNewStream = previousStreamingMessage?.id !== latestStreamingMessage.id;
-    const textGrew =
-      previousStreamingMessage?.id === latestStreamingMessage.id &&
-      latestStreamingMessage.textLength > previousStreamingMessage.textLength;
-
-    if (!isNewStream && !textGrew) {
-      return;
-    }
-
-    const now = Date.now();
-    if (!isNewStream && now - lastStreamHapticAtRef.current < 320) {
-      return;
-    }
-
-    lastStreamHapticAtRef.current = now;
-    void Haptics.selectionAsync();
+    return clearSettleTimer;
   }, [threadId, feed]);
 }
 

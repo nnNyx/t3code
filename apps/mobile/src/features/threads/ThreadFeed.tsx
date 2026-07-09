@@ -93,6 +93,7 @@ import {
 } from "../../lib/threadActivity";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { ThreadWorkGroupToggle, ThreadWorkLog } from "./thread-work-log";
+import { shouldPlayEntrance } from "./threadEntranceAnimation";
 import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 import { useAssetUrl } from "../../state/assets";
 import { resolveWorkspaceRelativeFilePath } from "../files/filePath";
@@ -112,15 +113,6 @@ function formatMessageTime(input: string): string {
 // Rows shift when content above them grows (streaming text, work-log folds);
 // animating the container position turns those jumps into slides.
 const FEED_ITEM_LAYOUT_TRANSITION = LinearTransition.duration(180);
-
-// Entering animations must only play for rows born just now — LegendList
-// remounts rows when they scroll back into view, and replaying an entrance for
-// old content would be its own kind of jank.
-const FRESH_ENTRY_WINDOW_MS = 3_000;
-function isFreshTimestamp(input: string): boolean {
-  const timestamp = Date.parse(input);
-  return Number.isFinite(timestamp) && Date.now() - timestamp < FRESH_ENTRY_WINDOW_MS;
-}
 
 export interface ThreadFeedProps {
   readonly environmentId: EnvironmentId;
@@ -823,6 +815,7 @@ function renderFeedEntry(
     readonly reviewCommentColors: ReviewCommentColors;
     readonly reviewCommentBubbleWidth: number;
     readonly userBubbleMaxWidth: number;
+    readonly feedOpenedAt: number;
   },
 ) {
   const entry = info.item;
@@ -880,7 +873,7 @@ function renderFeedEntry(
       !message.streaming;
 
     if (isUser) {
-      const enterAnimated = isFreshTimestamp(message.createdAt);
+      const enterAnimated = shouldPlayEntrance(message.createdAt, props.feedOpenedAt);
       return (
         <Animated.View
           className="mb-5 items-end"
@@ -939,7 +932,7 @@ function renderFeedEntry(
       return null;
     }
 
-    const enterAnimated = isFreshTimestamp(message.createdAt);
+    const enterAnimated = shouldPlayEntrance(message.createdAt, props.feedOpenedAt);
     return (
       <Animated.View
         className={cn(showAssistantMeta ? "mb-5 px-1" : "mb-2 px-1")}
@@ -998,6 +991,7 @@ function renderFeedEntry(
       activities={entry.activities}
       copiedRowId={props.copiedRowId}
       expandedRows={props.expandedWorkRows}
+      feedOpenedAt={props.feedOpenedAt}
       iconSubtleColor={iconSubtleColor}
       onCopyRow={props.onCopyWorkRow}
       onToggleRow={props.onToggleWorkRow}
@@ -1291,6 +1285,15 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const disclosureAnchorKeyRef = useRef<string | null>(null);
   const headerMaterialVisibleRef = useRef(false);
   const previousLatestTurnRef = useRef(props.latestTurn);
+  // When this thread was opened. Rows created before this never replay an
+  // entrance animation, so a freshly hydrated history (even one active moments
+  // ago) paints without a burst of simultaneous FadeIns. Reset on thread change
+  // in case the component is reused rather than remounted.
+  const feedOpenedAtRef = useRef({ threadId: props.threadId, at: Date.now() });
+  if (feedOpenedAtRef.current.threadId !== props.threadId) {
+    feedOpenedAtRef.current = { threadId: props.threadId, at: Date.now() };
+  }
+  const feedOpenedAt = feedOpenedAtRef.current.at;
   const { width: windowWidth } = useWindowDimensions();
   const [viewportWidth, setViewportWidth] = useState(() =>
     props.layoutVariant === "split" ? 0 : windowWidth,
@@ -1659,6 +1662,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         reviewCommentColors,
         reviewCommentBubbleWidth,
         userBubbleMaxWidth,
+        feedOpenedAt,
         skills: props.skills,
       }),
     [
@@ -1672,6 +1676,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       reviewCommentColors,
       reviewCommentBubbleWidth,
       userBubbleMaxWidth,
+      feedOpenedAt,
       onCopyWorkRow,
       onMarkdownLinkPress,
       onPressImage,
