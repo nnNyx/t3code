@@ -1,4 +1,5 @@
 import { MenuView } from "@react-native-menu/menu";
+import * as Haptics from "expo-haptics";
 import type { ComponentProps, ReactNode } from "react";
 import { Platform, Pressable, useColorScheme, View } from "react-native";
 import { SymbolView } from "expo-symbols";
@@ -74,7 +75,15 @@ export function ControlPill(props: {
     <Pressable
       accessibilityLabel={props.accessibilityLabel ?? props.label}
       accessibilityRole="button"
-      onPress={props.onPress}
+      // Light selection tick on tap; menu/long-press haptics live in their menus.
+      onPress={
+        props.onPress
+          ? () => {
+              void Haptics.selectionAsync();
+              props.onPress?.();
+            }
+          : undefined
+      }
       disabled={props.disabled}
       className={containerClassName}
     >
