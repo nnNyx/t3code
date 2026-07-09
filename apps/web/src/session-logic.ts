@@ -80,6 +80,13 @@ export interface WorkLogEntry {
   sourceActivityKind?: OrchestrationThreadActivity["kind"];
   /** Provider tool-call identity — groups lifecycle events of one call. */
   toolCallId?: string;
+  /**
+   * For background/async collab agents: the linked task id (equals the `agentId`
+   * reported in the launch result). Background agents' collab tool call returns
+   * immediately, so the panel tracks their true liveness via `task.*` activities
+   * keyed by this id rather than the (instantly "completed") tool lifecycle.
+   */
+  subagentTaskId?: string;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -638,19 +645,43 @@ export function deriveWorkLogEntries(
     if (activity.summary === "Checkpoint captured") continue;
     if (isPlanBoundaryToolActivity(activity)) continue;
     const entry = toDerivedWorkLogEntry(activity);
-    // Some providers (e.g. codex) emit tool.started with an empty payload — no
-    // toolCallId, title, command, or detail — which derives a collapseKey of
-    // undefined. Such a row can never merge into its later updated/completed
-    // event, so keeping it only produces standalone noise ("… started {}").
-    // Identity-bearing starts (a real collapseKey) still surface early and then
-    // collapse into their completion.
-    if (activity.kind === "tool.started" && entry.collapseKey === undefined) continue;
+    if (activity.kind === "tool.started") {
+      // Some providers (e.g. codex) emit tool.started with an empty payload — no
+      // toolCallId, title, command, or detail — which derives a collapseKey of
+      // undefined. Such a row can never merge into its later updated/completed
+      // event, so keeping it only produces standalone noise ("… started {}").
+      if (entry.collapseKey === undefined) continue;
+      // Args stream in *after* the start event: providers emit the started row
+      // with a braces-only placeholder detail — bare "{}" or "<Tool>: {}"
+      // (e.g. "Bash: {}", "Agent: {}") — and no toolCallId, so it shares no
+      // collapse key with its later updated/completed event and would linger as a
+      // phantom "… started {}" row (and, for collab agents, a stuck subagent).
+      // The tool.updated event moments later (full args + status:"inProgress") is
+      // the visible running row, so drop the placeholder. Identity-bearing starts
+      // (real toolCallId or real args) are kept and collapse as before.
+      if (entry.toolCallId === undefined && hasBracesOnlyStartedArgs(activity.payload)) {
+        continue;
+      }
+    }
     entries.push(entry);
   }
   return collapseDerivedWorkLogEntries(entries).map((entry) => {
     const { activityKind, collapseKey: _collapseKey, ...rest } = entry;
     return Object.assign(rest, { sourceActivityKind: activityKind });
   });
+}
+
+/** Braces-only args placeholder: bare "{}" or "<Label>: {}" (whitespace tolerant). */
+const BRACES_ONLY_ARGS_DETAIL = /^(?:[^\n{}]*:\s*)?\{\s*\}$/;
+
+/** True when a tool.started payload's detail is a braces-only args placeholder. */
+function hasBracesOnlyStartedArgs(payload: OrchestrationThreadActivity["payload"]): boolean {
+  const detail = asRecord(payload)?.detail;
+  if (typeof detail !== "string") {
+    return false;
+  }
+  const trimmed = detail.trim();
+  return trimmed.length > 0 && BRACES_ONLY_ARGS_DETAIL.test(trimmed);
 }
 
 export type SubagentRailStatus = "running" | "completed" | "failed";
@@ -675,18 +706,45 @@ export function deriveSubagentRailItems(
   return collectTurnSubagents(entries, activeTurnId);
 }
 
+/** Keep long sessions bounded: the panel shows running agents plus the most
+ * recent finished ones, which is all a reviewer needs. */
+const MAX_PANEL_SUBAGENTS = 50;
+
 /**
- * Subagents for a turn regardless of whether it is still running — backs the
- * toggleable Subagents right-panel. Unlike the floating rail (which only tracks
- * the live turn and vanishes once it settles), the panel keeps completed and
- * failed agents reviewable, so callers pass the latest turn id even after the
- * session goes idle. Running-first ordering and status parsing are shared.
+ * Subagents for the whole session — backs the toggleable Subagents right-panel.
+ * Unlike the floating rail (which only tracks the live turn and vanishes once it
+ * settles), the panel is session-scoped: agents dispatched in an earlier turn
+ * keep working while later turns start, so scoping to a single turn would show
+ * "no subagents" while agents demonstrably run. Rows are ordered running-first
+ * then most-recent-first, and capped to the most recent {@link
+ * MAX_PANEL_SUBAGENTS}.
+ *
+ * Background/async agents return their collab tool call immediately (the launch
+ * succeeds in seconds) yet keep working for minutes, so the tool lifecycle would
+ * read "completed" while they run. When a collab agent is linked to a background
+ * task (its launch result carries an `agentId`), the panel trusts the `task.*`
+ * activity lifecycle keyed by that id instead: running while `task.progress`
+ * events arrive with no `task.completed`, and surfacing the latest progress
+ * detail as the row's live status line.
  */
 export function deriveSubagentPanelItems(
   entries: ReadonlyArray<WorkLogEntry>,
-  turnId: TurnId | null,
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): SubagentRailItem[] {
-  return collectTurnSubagents(entries, turnId);
+  return collectSessionSubagents(entries, activities);
+}
+
+/** Map a tool lifecycle status to the coarse subagent rail/panel status. */
+function subagentStatusFromLifecycle(
+  status: WorkLogToolLifecycleStatus | undefined,
+): SubagentRailStatus {
+  if (status === "failed" || status === "declined") {
+    return "failed";
+  }
+  if (status === "completed" || status === "stopped") {
+    return "completed";
+  }
+  return "running";
 }
 
 function collectTurnSubagents(
@@ -700,12 +758,7 @@ function collectTurnSubagents(
   for (const entry of entries) {
     if (entry.itemType !== "collab_agent_tool_call") continue;
     if (entry.turnId !== turnId) continue;
-    const status: SubagentRailStatus =
-      entry.toolLifecycleStatus === "failed" || entry.toolLifecycleStatus === "declined"
-        ? "failed"
-        : entry.toolLifecycleStatus === "completed" || entry.toolLifecycleStatus === "stopped"
-          ? "completed"
-          : "running";
+    const status = subagentStatusFromLifecycle(entry.toolLifecycleStatus);
     const { name, detail } = parseSubagentName(entry);
     items.push({ id: entry.id, name, detail, status, createdAt: entry.createdAt });
   }
@@ -719,6 +772,98 @@ function collectTurnSubagents(
       return leftRank - rightRank || left.index - right.index;
     })
     .map(({ item }) => item);
+}
+
+interface TaskLiveness {
+  hasProgress: boolean;
+  latestProgressDetail: string | null;
+  latestProgressAt: string;
+  /** Terminal status once `task.completed` fires; null while still running. */
+  terminalStatus: SubagentRailStatus | null;
+}
+
+/**
+ * Index the background-task lifecycle by task id. `task.completed` is a real
+ * terminal event (carries `status`), and `task.progress` events stream a live
+ * `detail` string ("Reading …", "Running …") while the task runs — this is the
+ * most truthful liveness signal for background agents.
+ */
+function indexTaskLiveness(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): Map<string, TaskLiveness> {
+  const byTaskId = new Map<string, TaskLiveness>();
+  for (const activity of activities) {
+    if (activity.kind !== "task.progress" && activity.kind !== "task.completed") {
+      continue;
+    }
+    const payload = asRecord(activity.payload);
+    const taskId = asTrimmedString(payload?.taskId);
+    if (!taskId) continue;
+    const liveness = byTaskId.get(taskId) ?? {
+      hasProgress: false,
+      latestProgressDetail: null,
+      latestProgressAt: "",
+      terminalStatus: null,
+    };
+    if (activity.kind === "task.progress") {
+      liveness.hasProgress = true;
+      const detail = asTrimmedString(payload?.detail);
+      if (detail && activity.createdAt >= liveness.latestProgressAt) {
+        liveness.latestProgressDetail = detail;
+        liveness.latestProgressAt = activity.createdAt;
+      }
+    } else {
+      // task.completed detail is the agent's final report — never a status line,
+      // so only the terminal status matters here.
+      liveness.terminalStatus = subagentStatusFromLifecycle(
+        extractWorkLogToolLifecycleStatus(payload),
+      );
+    }
+    byTaskId.set(taskId, liveness);
+  }
+  return byTaskId;
+}
+
+function collectSessionSubagents(
+  entries: ReadonlyArray<WorkLogEntry>,
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): SubagentRailItem[] {
+  const taskLiveness = indexTaskLiveness(activities);
+  const items: SubagentRailItem[] = [];
+  for (const entry of entries) {
+    if (entry.itemType !== "collab_agent_tool_call") continue;
+    const { name, detail } = parseSubagentName(entry);
+    const live = entry.subagentTaskId ? taskLiveness.get(entry.subagentTaskId) : undefined;
+    let status: SubagentRailStatus;
+    let statusDetail = detail;
+    if (live && live.terminalStatus === null && live.hasProgress) {
+      // Background agent still working: its collab tool call already reads
+      // "completed", but the task lifecycle proves otherwise. Show it running
+      // with its latest live activity as the detail line.
+      status = "running";
+      statusDetail = live.latestProgressDetail ?? detail;
+    } else if (live?.terminalStatus) {
+      status = live.terminalStatus;
+    } else {
+      status = subagentStatusFromLifecycle(entry.toolLifecycleStatus);
+    }
+    items.push({ id: entry.id, name, detail: statusDetail, status, createdAt: entry.createdAt });
+  }
+  // Running agents first (live and actionable), then most-recent-first so the
+  // freshest finished agents stay near the top; stable for equal timestamps.
+  return items
+    .map((item, index) => ({ item, index }))
+    .toSorted((left, right) => {
+      const leftRank = left.item.status === "running" ? 0 : 1;
+      const rightRank = right.item.status === "running" ? 0 : 1;
+      if (leftRank !== rightRank) {
+        return leftRank - rightRank;
+      }
+      const byRecency = right.item.createdAt.localeCompare(left.item.createdAt);
+      return byRecency !== 0 ? byRecency : left.index - right.index;
+    })
+    .map(({ item }) => item)
+    .slice(0, MAX_PANEL_SUBAGENTS);
 }
 
 /** Braces-only / empty payloads (e.g. an unstarted `{}`) carry no task text. */
@@ -836,6 +981,20 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     if (data?.item !== undefined) {
       entry.toolData = data.item;
     }
+  } else if (itemType === "collab_agent_tool_call") {
+    const data = asRecord(payload?.data);
+    // Carry the dispatch input (subagent_type, model, prompt, …) so the Subagents
+    // panel can show a useful expanded view instead of echoing the row's label.
+    if (data?.input !== undefined) {
+      entry.toolData = data.input;
+    }
+    // Background agents report an `agentId` in their launch result — this is the
+    // task id that the `task.*` lifecycle is keyed by, so the panel can track the
+    // agent's true liveness after the collab tool call returns.
+    const taskId = extractCollabAgentTaskId(data);
+    if (taskId) {
+      entry.subagentTaskId = taskId;
+    }
   }
   if (itemType) {
     entry.itemType = itemType;
@@ -940,6 +1099,7 @@ function mergeDerivedWorkLogEntries(
   const toolCallId = next.toolCallId ?? previous.toolCallId;
   const toolLifecycleStatus = next.toolLifecycleStatus ?? previous.toolLifecycleStatus;
   const toolData = next.toolData ?? previous.toolData;
+  const subagentTaskId = next.subagentTaskId ?? previous.subagentTaskId;
   return {
     ...previous,
     ...next,
@@ -958,6 +1118,7 @@ function mergeDerivedWorkLogEntries(
     ...(toolCallId ? { toolCallId } : {}),
     ...(toolLifecycleStatus !== undefined ? { toolLifecycleStatus } : {}),
     ...(toolData !== undefined ? { toolData } : {}),
+    ...(subagentTaskId ? { subagentTaskId } : {}),
   };
 }
 
@@ -1214,6 +1375,18 @@ function extractToolTitle(payload: Record<string, unknown> | null): string | nul
 function extractToolCallId(payload: Record<string, unknown> | null): string | null {
   const data = asRecord(payload?.data);
   return asTrimmedString(data?.toolCallId);
+}
+
+/** Async agent launches report `agentId: <id>` in their tool result text — that
+ * id is the task id used by the `task.*` liveness lifecycle. */
+function extractCollabAgentTaskId(data: Record<string, unknown> | null): string | null {
+  const result = asRecord(data?.result);
+  const text = asTrimmedString(result?.text);
+  if (!text) {
+    return null;
+  }
+  const match = /agentId:\s*([A-Za-z0-9_-]+)/.exec(text);
+  return match?.[1] ?? null;
 }
 
 function normalizeInlinePreview(value: string): string {

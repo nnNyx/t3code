@@ -1770,15 +1770,13 @@ function ChatViewContent(props: ChatViewProps) {
       ),
     [workLogEntries, activeThread?.session?.status, activeThread?.session?.activeTurnId],
   );
-  // Panel keeps the latest turn's subagents reviewable even after it settles —
-  // the rail vanishes when running stops, but the panel should not.
-  const subagentPanelTurnId =
-    activeThread?.session?.status === "running"
-      ? (activeThread?.session?.activeTurnId ?? null)
-      : (activeLatestTurn?.turnId ?? null);
+  // The panel is session-scoped: unlike the floating rail (live turn only), it
+  // lists subagents across every turn so agents launched earlier stay visible
+  // while later turns run, and finished ones stay reviewable after the session
+  // goes idle. Liveness of background agents comes from the raw task.* activities.
   const subagentPanelItems = useMemo(
-    () => deriveSubagentPanelItems(workLogEntries, subagentPanelTurnId),
-    [workLogEntries, subagentPanelTurnId],
+    () => deriveSubagentPanelItems(workLogEntries, threadActivities),
+    [workLogEntries, threadActivities],
   );
   const subagentEntriesById = useMemo(() => {
     const map = new Map<string, WorkLogEntry>();

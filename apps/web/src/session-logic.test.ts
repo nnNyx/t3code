@@ -771,6 +771,123 @@ describe("deriveWorkLogEntries", () => {
     expect(entries[0]?.toolLifecycleStatus).toBe("completed");
   });
 
+  it("drops a braces-only command tool.started but keeps the real updated row", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "cmd-start",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Command run started",
+        // Args haven't streamed yet: braces-only placeholder, no toolCallId.
+        payload: { itemType: "command_execution", detail: "Bash: {}" },
+      }),
+      makeActivity({
+        id: "cmd-updated",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.updated",
+        summary: "Command run",
+        payload: {
+          itemType: "command_execution",
+          status: "inProgress",
+          detail: "Bash: ls -la",
+          data: { toolName: "Bash", input: { command: "ls -la" } },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+    expect(entries.map((entry) => entry.id)).toEqual(["cmd-updated"]);
+    expect(entries[0]?.toolLifecycleStatus).toBe("inProgress");
+  });
+
+  it("drops a braces-only collab agent tool.started (no phantom subagent)", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "agent-start",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Agent run started",
+        payload: { itemType: "collab_agent_tool_call", detail: "Agent: {}" },
+      }),
+      makeActivity({
+        id: "agent-updated",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.updated",
+        summary: "Agent run",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "inProgress",
+          detail: "Explore: Map the pipeline",
+          data: { toolName: "Agent", input: { subagent_type: "Explore", prompt: "Explore…" } },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+    expect(entries.map((entry) => entry.id)).toEqual(["agent-updated"]);
+  });
+
+  it("drops braces-only started placeholders regardless of label or whitespace", () => {
+    for (const detail of ["{}", "  {}  ", "Bash: {}", "Agent: { }", "general-purpose: {}"]) {
+      const entries = deriveWorkLogEntries([
+        makeActivity({
+          id: "placeholder-start",
+          kind: "tool.started",
+          summary: "Tool started",
+          payload: { itemType: "command_execution", detail },
+        }),
+      ]);
+      expect(entries).toEqual([]);
+    }
+  });
+
+  it("keeps a tool.started whose args already streamed (real detail, no toolCallId)", () => {
+    const entries = deriveWorkLogEntries([
+      makeActivity({
+        id: "real-start",
+        kind: "tool.started",
+        summary: "Command run",
+        payload: { itemType: "command_execution", detail: "Bash: ls -la" },
+      }),
+    ]);
+    expect(entries.map((entry) => entry.id)).toEqual(["real-start"]);
+  });
+
+  it("captures collab agent input as toolData and links its background task id", () => {
+    const entries = deriveWorkLogEntries([
+      makeActivity({
+        id: "collab-done",
+        kind: "tool.completed",
+        summary: "Agent run",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          detail: "Explore: Map the pipeline",
+          data: {
+            toolName: "Agent",
+            input: {
+              subagent_type: "Explore",
+              model: "sonnet",
+              description: "Map the pipeline",
+              prompt: "Explore the repo end to end.",
+            },
+            result: {
+              text: "Async agent launched successfully.\nagentId: aceae07ac3dc67b16 (internal ID)",
+            },
+          },
+        },
+      }),
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.toolData).toEqual({
+      subagent_type: "Explore",
+      model: "sonnet",
+      description: "Map the pipeline",
+      prompt: "Explore the repo end to end.",
+    });
+    expect(entries[0]?.subagentTaskId).toBe("aceae07ac3dc67b16");
+  });
+
   it("surfaces a completed command's stdout as detail and keeps the command once", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -1905,54 +2022,44 @@ describe("deriveSubagentPanelItems", () => {
     };
   }
 
-  it("keeps every status of the turn's subagents, running-first", () => {
+  it("collects subagents across every turn, running-first then most-recent-first", () => {
     const entries: WorkLogEntry[] = [
       makePanelEntry({
         id: "done-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
         detail: "Explore: first task",
         toolLifecycleStatus: "completed",
       }),
       makePanelEntry({
         id: "run-1",
+        createdAt: "2026-02-23T00:00:02.000Z",
         detail: "general-purpose: second task",
         toolLifecycleStatus: "inProgress",
       }),
       makePanelEntry({
         id: "failed-1",
+        createdAt: "2026-02-23T00:00:03.000Z",
         detail: "Explore: third task",
         toolLifecycleStatus: "failed",
       }),
-      // Ignored: different turn, or not a collab agent call.
-      makePanelEntry({ id: "other-turn", turnId: TurnId.make("turn-other") }),
+      // A different turn — included (session-scoped, unlike the live-turn rail).
+      makePanelEntry({
+        id: "other-turn",
+        createdAt: "2026-02-23T00:00:04.000Z",
+        turnId: TurnId.make("turn-other"),
+        detail: "Explore: fourth task",
+        toolLifecycleStatus: "inProgress",
+      }),
+      // Ignored: not a collab agent call.
       makePanelEntry({ id: "not-agent", itemType: "command_execution" }),
     ];
 
-    expect(deriveSubagentPanelItems(entries, turnId)).toEqual([
-      {
-        id: "run-1",
-        name: "general-purpose",
-        detail: "second task",
-        status: "running",
-        createdAt: "2026-02-23T00:00:01.000Z",
-      },
-      {
-        id: "done-1",
-        name: "Explore",
-        detail: "first task",
-        status: "completed",
-        createdAt: "2026-02-23T00:00:01.000Z",
-      },
-      {
-        id: "failed-1",
-        name: "Explore",
-        detail: "third task",
-        status: "failed",
-        createdAt: "2026-02-23T00:00:01.000Z",
-      },
-    ]);
+    const items = deriveSubagentPanelItems(entries, []);
+    expect(items.map((item) => item.id)).toEqual(["other-turn", "run-1", "failed-1", "done-1"]);
+    expect(items.map((item) => item.status)).toEqual(["running", "running", "failed", "completed"]);
   });
 
-  it("returns the turn's subagents even after it settles (no running gate)", () => {
+  it("keeps completed agents reviewable after the session goes idle", () => {
     const entries = [
       makePanelEntry({
         id: "done-only",
@@ -1960,14 +2067,87 @@ describe("deriveSubagentPanelItems", () => {
         toolLifecycleStatus: "completed",
       }),
     ];
-
-    // Unlike the rail, callers pass the latest turn id even when idle, and the
-    // completed agent stays reviewable.
-    expect(deriveSubagentPanelItems(entries, turnId).map((item) => item.id)).toEqual(["done-only"]);
+    expect(deriveSubagentPanelItems(entries, []).map((item) => item.id)).toEqual(["done-only"]);
   });
 
-  it("returns nothing without a turn", () => {
-    const entries = [makePanelEntry({ id: "agent-1", toolLifecycleStatus: "completed" })];
-    expect(deriveSubagentPanelItems(entries, null)).toEqual([]);
+  it("treats a linked background agent as running while its task streams progress", () => {
+    const entries: WorkLogEntry[] = [
+      makePanelEntry({
+        id: "bg-agent",
+        detail: "Explore: long background job",
+        // The collab tool call already returned, so the lifecycle reads completed…
+        toolLifecycleStatus: "completed",
+        subagentTaskId: "aceae07ac3dc67b16",
+      }),
+    ];
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "p1",
+        kind: "task.progress",
+        createdAt: "2026-02-23T00:00:05.000Z",
+        payload: { taskId: "aceae07ac3dc67b16", detail: "Reading MessagesTimeline.tsx" },
+      }),
+      makeActivity({
+        id: "p2",
+        kind: "task.progress",
+        createdAt: "2026-02-23T00:00:06.000Z",
+        payload: { taskId: "aceae07ac3dc67b16", detail: "Running tests" },
+      }),
+    ];
+
+    const [item] = deriveSubagentPanelItems(entries, activities);
+    // …but the task lifecycle proves it is still working.
+    expect(item?.status).toBe("running");
+    // The live status line is the latest task.progress detail.
+    expect(item?.detail).toBe("Running tests");
+  });
+
+  it("marks a linked background agent completed once its task terminates", () => {
+    const entries = [
+      makePanelEntry({
+        id: "bg-agent",
+        detail: "Explore: background job",
+        toolLifecycleStatus: "completed",
+        subagentTaskId: "t1",
+      }),
+    ];
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "p1",
+        kind: "task.progress",
+        createdAt: "2026-02-23T00:00:05.000Z",
+        payload: { taskId: "t1", detail: "Working" },
+      }),
+      makeActivity({
+        id: "c1",
+        kind: "task.completed",
+        createdAt: "2026-02-23T00:00:07.000Z",
+        payload: {
+          taskId: "t1",
+          status: "completed",
+          detail: "Final report — do not show as status.",
+        },
+      }),
+    ];
+
+    const [item] = deriveSubagentPanelItems(entries, activities);
+    expect(item?.status).toBe("completed");
+    // Detail stays the task label, never the giant final report from task.completed.
+    expect(item?.detail).toBe("background job");
+  });
+
+  it("falls back to the tool lifecycle when no background task is linked", () => {
+    const entries = [
+      makePanelEntry({
+        id: "sync",
+        detail: "Explore: quick task",
+        toolLifecycleStatus: "completed",
+      }),
+    ];
+    expect(deriveSubagentPanelItems(entries, [])[0]?.status).toBe("completed");
+  });
+
+  it("returns nothing when there are no subagents", () => {
+    expect(deriveSubagentPanelItems([], [])).toEqual([]);
   });
 });

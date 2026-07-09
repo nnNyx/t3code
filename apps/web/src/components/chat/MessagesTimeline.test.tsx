@@ -593,4 +593,30 @@ describe("buildToolCallExpandedBody", () => {
       }),
     ).toBe("pwsh -c 'bun run lint'");
   });
+
+  it("shows a subagent's dispatch input instead of echoing its label detail", async () => {
+    expect(
+      await build({
+        itemType: "collab_agent_tool_call",
+        detail: "Explore: Map the pipeline",
+        toolData: {
+          subagent_type: "Explore",
+          model: "sonnet",
+          description: "Map the pipeline",
+          prompt: "Explore the repo end to end.",
+        },
+      }),
+    ).toBe("Type: Explore\nModel: sonnet\n\nExplore the repo end to end.");
+  });
+
+  it("suppresses a subagent body that would only repeat the row label", async () => {
+    // No dispatch input available: the "<type>: <description>" detail already
+    // shows in the row, so the expansion has nothing extra and stays null.
+    expect(
+      await build({
+        itemType: "collab_agent_tool_call",
+        detail: "Explore: Map the pipeline",
+      }),
+    ).toBeNull();
+  });
 });

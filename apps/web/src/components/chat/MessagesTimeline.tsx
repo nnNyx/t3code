@@ -1781,6 +1781,46 @@ function workEntryRawCommand(
   return rawCommand === workEntry.command.trim() ? null : rawCommand;
 }
 
+/** Non-empty trimmed string from an unknown value, else null. */
+function toolInputString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * Render blocks for a collab subagent's dispatch input: a "Type / Model" header
+ * followed by the full prompt. Returns [] when no usable input is present, so
+ * callers can fall back / suppress an empty expansion.
+ */
+function subagentInputBlocks(toolData: unknown): string[] {
+  const input =
+    toolData && typeof toolData === "object" ? (toolData as Record<string, unknown>) : null;
+  if (!input) {
+    return [];
+  }
+  const blocks: string[] = [];
+  const meta: string[] = [];
+  const subagentType = toolInputString(input.subagent_type);
+  if (subagentType) {
+    meta.push(`Type: ${subagentType}`);
+  }
+  const model = toolInputString(input.model);
+  if (model) {
+    meta.push(`Model: ${model}`);
+  }
+  if (meta.length > 0) {
+    blocks.push(meta.join("\n"));
+  }
+  const prompt = toolInputString(input.prompt);
+  if (prompt) {
+    blocks.push(prompt);
+  }
+  return blocks;
+}
+
 export function buildToolCallExpandedBody(
   workEntry: TimelineWorkEntry,
   workspaceRoot: string | undefined,
@@ -1802,13 +1842,26 @@ export function buildToolCallExpandedBody(
   if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
     pushBlock(`MCP call\n${JSON.stringify(workEntry.toolData, null, 2)}`);
   }
+  const isSubagent = workEntry.itemType === "collab_agent_tool_call";
+  if (isSubagent) {
+    // The dispatch input (type/model/prompt) is the useful expansion for a
+    // subagent — far more than echoing its "<type>: <description>" label.
+    for (const block of subagentInputBlocks(workEntry.toolData)) {
+      pushBlock(block);
+    }
+  }
   const raw = workEntryRawCommand(workEntry);
   if (raw?.trim()) {
     pushBlock(raw);
   } else if (workEntry.command?.trim()) {
     pushBlock(workEntry.command);
   }
-  pushBlock(workEntry.detail);
+  // A subagent row already shows its "<type>: <description>" detail as the row
+  // preview, so repeating it in the expansion is pure duplication — the input
+  // blocks above carry the useful content instead.
+  if (!isSubagent) {
+    pushBlock(workEntry.detail);
+  }
   const changedFiles = workEntry.changedFiles ?? [];
   if (changedFiles.length > 0) {
     pushBlock(

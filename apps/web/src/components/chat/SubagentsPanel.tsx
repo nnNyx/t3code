@@ -24,7 +24,7 @@ export const SubagentsPanel = memo(function SubagentsPanel({
   if (items.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-        <p className="text-center text-sm text-muted-foreground">No subagents in this turn.</p>
+        <p className="text-center text-sm text-muted-foreground">No subagents yet.</p>
       </div>
     );
   }
@@ -56,13 +56,17 @@ function SubagentRow({
   workspaceRoot: string | undefined;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // buildToolCallExpandedBody surfaces the subagent's dispatch input
+  // (type/model/prompt) and deliberately omits the "<type>: <description>" label
+  // that the row already shows, so a non-null result is genuinely richer. When it
+  // is null there is nothing beyond the label to show, so avoid repeating
+  // item.detail verbatim in the expansion.
   const expandedBody = entry ? buildToolCallExpandedBody(entry, workspaceRoot) : null;
   const detailText =
     expandedBody ??
-    item.detail ??
     (item.status === "running"
       ? "This subagent is just getting started — no task description reported yet."
-      : "No description provided for this subagent.");
+      : "No further detail reported for this subagent.");
 
   return (
     <div
