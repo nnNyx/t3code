@@ -97,7 +97,10 @@ export const ChatHeader = memo(function ChatHeader({
         data-chat-header-actions
         className={cn(
           "flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3",
-          rightPanelOpen ? "pr-0" : "pr-16",
+          // Reserve room for the absolutely-positioned panel-layout controls
+          // (terminal + right-panel + subagents toggles). pr-24 fits all three;
+          // pr-16 only cleared two and the subagents toggle overlapped Commit.
+          rightPanelOpen ? "pr-0" : "pr-24",
         )}
       >
         {activeProjectScripts && (
