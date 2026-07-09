@@ -1785,6 +1785,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     path.join(stageAppDir, "pnpm-workspace.yaml"),
     stageWorkspaceConfigString,
   );
+  // Flatten node_modules for the packaged app: with pnpm's default isolated
+  // linker, a hoisted-to-asar-root package (e.g. effect's peer fast-check)
+  // can't reach its own transitive deps (pure-rand, …) left behind in the
+  // .pnpm store, so the app crashes at launch with ERR_MODULE_NOT_FOUND. A
+  // hoisted layout puts the whole tree at the root where walk-up resolution
+  // finds everything inside the asar.
+  yield* fs.writeFileString(path.join(stageAppDir, ".npmrc"), "node-linker=hoisted\n");
 
   if (Object.keys(stagePatchedDependencies).length > 0) {
     yield* fs.copy(path.join(repoRoot, "patches"), path.join(stageAppDir, "patches"));
