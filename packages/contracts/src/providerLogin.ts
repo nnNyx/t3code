@@ -1,12 +1,9 @@
 /**
  * Provider-login contracts.
  *
- * An additive, provider-scoped terminal session dedicated to running a
- * driver's interactive CLI login (e.g. `codex login --device-auth`,
- * `claude setup-token`) inside a PTY whose environment is isolated to the
- * instance's home (CODEX_HOME / HOME override). The session literally *is* a
- * terminal — output streams to the client and the client can type stdin — but
- * unlike thread terminals it is ephemeral and never persisted to disk.
+ * An additive, provider-scoped login session. Structured provider APIs emit a
+ * challenge directly; interactive CLI-only providers stream a PTY whose
+ * environment is isolated to the instance's home.
  *
  * The methods are keyed by `ProviderInstanceId` (one active login session per
  * instance). They are purely additive: old clients never call them, so adding
@@ -66,6 +63,12 @@ const ProviderLoginOutputEvent = Schema.Struct({
   data: Schema.String,
 });
 
+const ProviderLoginChallengeEvent = Schema.Struct({
+  type: Schema.Literal("challenge"),
+  url: Schema.String.check(Schema.isNonEmpty()),
+  code: Schema.String.check(Schema.isNonEmpty()),
+});
+
 const ProviderLoginExitedEvent = Schema.Struct({
   type: Schema.Literal("exited"),
   exitCode: Schema.NullOr(Schema.Int),
@@ -79,6 +82,7 @@ const ProviderLoginErrorEvent = Schema.Struct({
 
 export const ProviderLoginStreamEvent = Schema.Union([
   ProviderLoginStartedEvent,
+  ProviderLoginChallengeEvent,
   ProviderLoginOutputEvent,
   ProviderLoginExitedEvent,
   ProviderLoginErrorEvent,

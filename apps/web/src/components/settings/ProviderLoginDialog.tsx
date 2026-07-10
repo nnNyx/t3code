@@ -73,6 +73,12 @@ export function ProviderLoginDialog({
   );
   const state = login.data ?? EMPTY_PROVIDER_LOGIN_STATE;
 
+  // Latest accumulated output, readable from the terminal-creation effect
+  // without making `state.output` a dependency of it (which would tear down and
+  // recreate the terminal on every streamed byte).
+  const outputRef = useRef(state.output);
+  outputRef.current = state.output;
+
   const write = useAtomCommand(providerLoginEnvironment.write, { reportFailure: false });
   const resize = useAtomCommand(providerLoginEnvironment.resize, { reportFailure: false });
   const cancel = useAtomCommand(providerLoginEnvironment.cancel, { reportFailure: false });
@@ -109,20 +115,44 @@ export function ProviderLoginDialog({
     });
     terminal.loadAddon(fitAddon);
     terminal.open(mount);
-    try {
-      fitAddon.fit();
-    } catch {
-      // ignore transient fit failures before layout settles
-    }
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
-    writtenLengthRef.current = 0;
+
+    // Flush whatever output already accumulated before this terminal existed.
+    // The write effect below only reacts to *changes* in `state.output`; the
+    // login CLIs (codex device-auth / claude setup-token) emit their URL and
+    // prompts in an initial burst and then go quiet while the user authorizes,
+    // so any output that landed before the terminal was created (buffered
+    // snapshot replay on attach, a re-open, or a StrictMode remount) would
+    // otherwise never be painted, leaving the pane blank the whole time.
+    const initialOutput = outputRef.current;
+    if (initialOutput.length > 0) {
+      terminal.write(initialOutput);
+    }
+    writtenLengthRef.current = initialOutput.length;
 
     const inputDisposable = terminal.onData((data) => {
       void write({ environmentId, input: { instanceId, data } });
     });
 
-    void resize({ environmentId, input: { instanceId, cols: terminal.cols, rows: terminal.rows } });
+    // Fit once layout has settled: the dialog animates in (scale/opacity), so a
+    // synchronous fit here can size the PTY against an unmeasured surface.
+    let fitFrame = 0;
+    const applyFit = () => {
+      const activeTerminal = terminalRef.current;
+      const activeFit = fitAddonRef.current;
+      if (!activeTerminal || !activeFit) return;
+      try {
+        activeFit.fit();
+      } catch {
+        // ignore transient fit failures before layout settles
+      }
+      void resize({
+        environmentId,
+        input: { instanceId, cols: activeTerminal.cols, rows: activeTerminal.rows },
+      });
+    };
+    fitFrame = requestAnimationFrame(applyFit);
 
     const resizeObserver = new ResizeObserver(() => {
       const activeTerminal = terminalRef.current;
@@ -141,6 +171,9 @@ export function ProviderLoginDialog({
     resizeObserver.observe(mount);
 
     return () => {
+      if (fitFrame !== 0) {
+        cancelAnimationFrame(fitFrame);
+      }
       resizeObserver.disconnect();
       inputDisposable.dispose();
       terminalRef.current = null;

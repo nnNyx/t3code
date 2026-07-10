@@ -22,6 +22,7 @@ import {
 } from "../terminal/PtyAdapter.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { ProviderRegistry } from "./Services/ProviderRegistry.ts";
+import { CodexDeviceAuth, type CodexDeviceAuthStartInput } from "./CodexDeviceAuth.ts";
 import * as ProviderLoginManager from "./ProviderLoginManager.ts";
 
 interface FakePty extends PtyProcess {
@@ -35,11 +36,17 @@ interface FakePty extends PtyProcess {
 // Shared recorders — reset at the start of each test.
 const spawned: FakePty[] = [];
 const refreshed: string[] = [];
+const codexStarts: CodexDeviceAuthStartInput[] = [];
+let codexCanceled = false;
+let codexCompletion: Effect.Effect<{ readonly success: boolean }> = Effect.never;
 let settingsOverride: ServerSettings = DEFAULT_SERVER_SETTINGS;
 
 const reset = (settings: ServerSettings) => {
   spawned.length = 0;
   refreshed.length = 0;
+  codexStarts.length = 0;
+  codexCanceled = false;
+  codexCompletion = Effect.never;
   settingsOverride = settings;
 };
 
@@ -110,11 +117,31 @@ const ProviderRegistryMock = Layer.mock(ProviderRegistry)({
   streamChanges: Stream.empty,
 });
 
+const CodexDeviceAuthMock = Layer.succeed(
+  CodexDeviceAuth,
+  CodexDeviceAuth.of({
+    start: (input) =>
+      Effect.sync(() => {
+        codexStarts.push(input);
+        return {
+          loginId: "login-1",
+          verificationUrl: "https://auth.openai.com/device",
+          userCode: "ABCD-1234",
+          completion: codexCompletion,
+          cancel: Effect.sync(() => {
+            codexCanceled = true;
+          }),
+        };
+      }),
+  }),
+);
+
 const TestLayer = ProviderLoginManager.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       NodeServices.layer,
       FakePtyAdapterLayer,
+      CodexDeviceAuthMock,
       ServerSettingsMock,
       ProviderRegistryMock,
     ),
@@ -144,9 +171,10 @@ const waitUntil = (predicate: () => boolean) =>
   });
 
 it.layer(TestLayer)("ProviderLoginManager", (it) => {
-  it.effect("spawns codex login, streams output, and refreshes on exit", () =>
+  it.effect("starts structured Codex device auth and refreshes on completion", () =>
     Effect.gen(function* () {
       reset(settingsWithInstances(codexInstance("codex_lifecycle", {})));
+      codexCompletion = Effect.succeed({ success: true });
       const manager = yield* ProviderLoginManager.ProviderLoginManager;
       const events: ProviderLoginStreamEvent[] = [];
 
@@ -155,26 +183,21 @@ it.layer(TestLayer)("ProviderLoginManager", (it) => {
         collectInto(events),
       );
 
-      // A PTY was spawned with the codex device-auth command.
-      expect(spawned).toHaveLength(1);
-      expect(spawned[0]!.spawnInput.shell).toBe("codex");
-      expect(spawned[0]!.spawnInput.args).toEqual(["login", "--device-auth"]);
+      expect(spawned).toHaveLength(0);
+      expect(codexStarts).toHaveLength(1);
+      expect(codexStarts[0]!.binaryPath).toBe("codex");
 
       // The "started" event was replayed synchronously on attach.
       expect(events.find((event) => event.type === "started")).toMatchObject({
         type: "started",
         driver: "codex",
-        commandLabel: "codex login --device-auth",
+        commandLabel: "codex app-server: account/login/start",
       });
-
-      spawned[0]!.emitData("Open https://auth.openai.com/device code ABCD-1234\r\n");
-      yield* waitUntil(() => events.some((event) => event.type === "output"));
-      expect(events.find((event) => event.type === "output")).toMatchObject({
-        type: "output",
-        data: "Open https://auth.openai.com/device code ABCD-1234\r\n",
+      expect(events.find((event) => event.type === "challenge")).toMatchObject({
+        type: "challenge",
+        url: "https://auth.openai.com/device",
+        code: "ABCD-1234",
       });
-
-      spawned[0]!.emitExit(0, null);
       yield* waitUntil(() => events.some((event) => event.type === "exited"));
       expect(events.find((event) => event.type === "exited")).toMatchObject({
         type: "exited",
@@ -202,15 +225,15 @@ it.layer(TestLayer)("ProviderLoginManager", (it) => {
         () => Effect.void,
       );
 
-      expect(spawned).toHaveLength(1);
-      expect(spawned[0]!.spawnInput.env.CODEX_HOME).toBe(path.resolve(home));
+      expect(codexStarts).toHaveLength(1);
+      expect(codexStarts[0]!.env.CODEX_HOME).toBe(path.resolve(home));
       expect(yield* fs.exists(home)).toBe(true);
 
       unsubscribe();
     }),
   );
 
-  it.effect("cancel kills the running login PTY", () =>
+  it.effect("cancel cancels structured Codex device auth", () =>
     Effect.gen(function* () {
       reset(settingsWithInstances(codexInstance("codex_cancel", {})));
       const manager = yield* ProviderLoginManager.ProviderLoginManager;
@@ -219,9 +242,9 @@ it.layer(TestLayer)("ProviderLoginManager", (it) => {
         () => Effect.void,
       );
 
-      expect(spawned[0]!.killed).toBe(false);
+      expect(codexCanceled).toBe(false);
       yield* manager.cancel({ instanceId: ProviderInstanceId.make("codex_cancel") });
-      expect(spawned[0]!.killed).toBe(true);
+      expect(codexCanceled).toBe(true);
 
       unsubscribe();
     }),

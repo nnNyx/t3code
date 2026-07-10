@@ -53,14 +53,28 @@ export function applyProviderLoginStreamEvent(
         commandLabel: event.commandLabel,
         version: current.version + 1,
       };
+    case "challenge":
+      return {
+        ...current,
+        status: current.status === "starting" ? "running" : current.status,
+        url: event.url,
+        code: event.code,
+        version: current.version + 1,
+      };
     case "output": {
       const output = boundOutput(`${current.output}${event.data}`);
+      // Re-parse the accumulated buffer rather than locking onto the first
+      // match: PTY output is chunked arbitrarily, so a verification URL or code
+      // can arrive split across frames. The first occurrence's start position is
+      // fixed as the buffer only grows, so re-parsing keeps the same (first) URL
+      // while letting a partially-received one complete instead of freezing a
+      // truncated fragment.
       return {
         ...current,
         output,
         status: current.status === "starting" ? "running" : current.status,
-        url: current.url ?? parseProviderLoginUrl(output) ?? null,
-        code: current.code ?? parseProviderLoginCode(output) ?? null,
+        url: parseProviderLoginUrl(output) ?? current.url ?? null,
+        code: parseProviderLoginCode(output) ?? current.code ?? null,
         version: current.version + 1,
       };
     }

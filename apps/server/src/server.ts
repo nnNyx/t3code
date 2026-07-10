@@ -35,6 +35,7 @@ import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as ProviderLoginManager from "./provider/ProviderLoginManager.ts";
+import * as CodexDeviceAuth from "./provider/CodexDeviceAuth.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
@@ -250,7 +251,10 @@ const TerminalLayerLive = TerminalManager.layer.pipe(
 // Ephemeral provider-login PTY sessions. Reuses the same PTY primitive as the
 // terminal stack; the rest of its deps (ProviderRegistry, ServerSettings,
 // FileSystem, Path) are resolved from the surrounding runtime core.
-const ProviderLoginLayerLive = ProviderLoginManager.layer.pipe(Layer.provide(PtyAdapterLive));
+const ProviderLoginLayerLive = ProviderLoginManager.layer.pipe(
+  Layer.provide(PtyAdapterLive),
+  Layer.provide(CodexDeviceAuth.layer),
+);
 
 const PreviewLayerLive = Layer.empty.pipe(
   Layer.provideMerge(PreviewManager.layer),

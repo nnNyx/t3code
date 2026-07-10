@@ -1,10 +1,8 @@
 /**
- * ProviderLoginManager — ephemeral, PTY-backed provider CLI login sessions.
+ * ProviderLoginManager — ephemeral provider login sessions.
  *
- * A login session is a real interactive terminal: it spawns the driver's login
- * command (`codex login --device-auth`, `claude setup-token`) inside a PTY with
- * the instance's isolated home (`CODEX_HOME` / `HOME`), streams output to the
- * client, and accepts stdin so the user can paste a device code / press keys.
+ * Codex uses app-server's structured device-code API. Providers that only
+ * expose an interactive CLI (currently Claude) run inside an isolated PTY.
  *
  * It deliberately reuses the terminal stack's low-level primitive (`PtyAdapter`)
  * and the same subscribe/buffer/attach fan-out idiom as `TerminalManager`, but
@@ -33,11 +31,13 @@ import {
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as Scope from "effect/Scope";
 
 import { PtyAdapter, type PtyProcess } from "../terminal/PtyAdapter.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
@@ -45,6 +45,7 @@ import { ProviderRegistry } from "./Services/ProviderRegistry.ts";
 import { deriveProviderInstanceConfigMap } from "./Layers/ProviderInstanceRegistryHydration.ts";
 import { materializeCodexShadowHome, resolveCodexHomeLayout } from "./Drivers/CodexHomeLayout.ts";
 import { makeClaudeEnvironment, resolveClaudeHomePath } from "./Drivers/ClaudeHome.ts";
+import { CodexDeviceAuth } from "./CodexDeviceAuth.ts";
 
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
@@ -56,7 +57,8 @@ type LoginListener = (event: ProviderLoginStreamEvent) => Effect.Effect<void>;
 interface LoginSession {
   readonly instanceId: string;
   readonly driver: ProviderDriverKind;
-  readonly pty: PtyProcess;
+  readonly pty: PtyProcess | undefined;
+  readonly cancel: Effect.Effect<void>;
   readonly listeners: Set<LoginListener>;
   readonly buffer: ProviderLoginStreamEvent[];
   bufferBytes: number;
@@ -123,6 +125,7 @@ interface ResolvedLoginSpec {
   /** Directory that must exist before spawn (isolated home), when applicable. */
   readonly ensureHomeDir: string | undefined;
   readonly prepare: Effect.Effect<void, ProviderLoginSpawnError>;
+  readonly transport: "codexDeviceAuth" | "pty";
 }
 
 const decodeCodexSettings = Schema.decodeUnknownEffect(CodexSettings);
@@ -144,6 +147,7 @@ export const make = Effect.fn("ProviderLoginManager.make")(function* () {
   const ptyAdapter = yield* PtyAdapter;
   const serverSettings = yield* ServerSettingsService;
   const providerRegistry = yield* ProviderRegistry;
+  const codexDeviceAuth = yield* CodexDeviceAuth;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const baseEnv = process.env;
@@ -248,6 +252,7 @@ export const make = Effect.fn("ProviderLoginManager.make")(function* () {
           commandLabel: `${config.binaryPath} ${args.join(" ")}`,
           ensureHomeDir: codexHome,
           prepare,
+          transport: "codexDeviceAuth",
         } satisfies ResolvedLoginSpec;
       }
 
@@ -277,6 +282,7 @@ export const make = Effect.fn("ProviderLoginManager.make")(function* () {
           commandLabel: `${config.binaryPath} ${args.join(" ")}`,
           ensureHomeDir: isolated ? home : undefined,
           prepare: isolated ? makeDirectory(home).pipe(Effect.asVoid) : Effect.void,
+          transport: "pty",
         } satisfies ResolvedLoginSpec;
       }
 
@@ -294,6 +300,71 @@ export const make = Effect.fn("ProviderLoginManager.make")(function* () {
     Effect.gen(function* () {
       const spec = yield* resolveLoginSpec(request.instanceId);
       yield* spec.prepare;
+      if (spec.transport === "codexDeviceAuth") {
+        const loginScope = yield* Scope.make();
+        const closeLoginScope = Scope.close(loginScope, Exit.void).pipe(Effect.ignore);
+        const auth = yield* codexDeviceAuth
+          .start({ binaryPath: spec.command, cwd, env: spec.env })
+          .pipe(
+            Effect.provideService(Scope.Scope, loginScope),
+            Effect.mapError(
+              (cause) =>
+                new ProviderLoginSpawnError({
+                  instanceId: request.instanceId,
+                  detail: describeCause(cause),
+                }),
+            ),
+            Effect.onError(() => closeLoginScope),
+          );
+        const session: LoginSession = {
+          instanceId: request.instanceId,
+          driver: spec.driver,
+          pty: undefined,
+          cancel: auth.cancel.pipe(Effect.ignore, Effect.ensuring(closeLoginScope)),
+          listeners: new Set(),
+          buffer: [],
+          bufferBytes: 0,
+          exited: false,
+        };
+        sessions.set(request.instanceId, session);
+        publish(session, {
+          type: "started",
+          instanceId: request.instanceId,
+          driver: spec.driver,
+          commandLabel: `${spec.command} app-server: account/login/start`,
+        });
+        publish(session, {
+          type: "challenge",
+          url: auth.verificationUrl,
+          code: auth.userCode,
+        });
+        runFork(
+          auth.completion.pipe(
+            Effect.flatMap((completion) =>
+              Effect.sync(() => {
+                if (session.exited) return;
+                session.exited = true;
+                publish(session, {
+                  type: "exited",
+                  exitCode: completion.success ? 0 : 1,
+                  exitSignal: null,
+                });
+                if (sessions.get(request.instanceId) === session) {
+                  sessions.delete(request.instanceId);
+                }
+              }),
+            ),
+            Effect.andThen(
+              providerRegistry
+                .refreshInstance(request.instanceId)
+                .pipe(Effect.ignoreCause({ log: true })),
+            ),
+            Effect.ensuring(closeLoginScope),
+            Effect.ignoreCause({ log: true }),
+          ),
+        );
+        return session;
+      }
       const pty = yield* ptyAdapter
         .spawn({
           shell: spec.command,
@@ -317,6 +388,7 @@ export const make = Effect.fn("ProviderLoginManager.make")(function* () {
         instanceId: request.instanceId,
         driver: spec.driver,
         pty,
+        cancel: Effect.sync(() => pty.kill()),
         listeners: new Set(),
         buffer: [],
         bufferBytes: 0,
@@ -406,48 +478,45 @@ export const make = Effect.fn("ProviderLoginManager.make")(function* () {
   const write: ProviderLoginManagerShape["write"] = (request) =>
     requireRunning(request.instanceId).pipe(
       Effect.flatMap((session) =>
-        Effect.try({
-          try: () => session.pty.write(request.data),
-          catch: (cause) => new ProviderLoginWriteError({ instanceId: request.instanceId, cause }),
-        }),
+        session.pty === undefined
+          ? Effect.void
+          : Effect.try({
+              try: () => session.pty?.write(request.data),
+              catch: (cause) =>
+                new ProviderLoginWriteError({ instanceId: request.instanceId, cause }),
+            }),
       ),
     );
 
   const resize: ProviderLoginManagerShape["resize"] = (request) =>
     requireRunning(request.instanceId).pipe(
       Effect.flatMap((session) =>
-        Effect.try({
-          try: () => session.pty.resize(request.cols, request.rows),
-          catch: (cause) => new ProviderLoginWriteError({ instanceId: request.instanceId, cause }),
-        }),
+        session.pty === undefined
+          ? Effect.void
+          : Effect.try({
+              try: () => session.pty?.resize(request.cols, request.rows),
+              catch: (cause) =>
+                new ProviderLoginWriteError({ instanceId: request.instanceId, cause }),
+            }),
       ),
     );
 
   const cancel: ProviderLoginManagerShape["cancel"] = (request) =>
-    Effect.sync(() => {
+    Effect.suspend(() => {
       const session = sessions.get(request.instanceId);
       if (session && !session.exited) {
-        try {
-          session.pty.kill();
-        } catch {
-          // best effort — onExit fan-out still cleans up
-        }
+        session.exited = true;
+        sessions.delete(request.instanceId);
+        publish(session, { type: "exited", exitCode: 1, exitSignal: null });
+        return session.cancel.pipe(Effect.ignore);
       }
+      return Effect.void;
     });
 
   yield* Effect.addFinalizer(() =>
-    Effect.sync(() => {
-      for (const session of sessions.values()) {
-        if (!session.exited) {
-          try {
-            session.pty.kill();
-          } catch {
-            // ignore teardown failures
-          }
-        }
-      }
-      sessions.clear();
-    }),
+    Effect.forEach(sessions.values(), (session) => session.cancel.pipe(Effect.ignore), {
+      discard: true,
+    }).pipe(Effect.ensuring(Effect.sync(() => sessions.clear()))),
   );
 
   return ProviderLoginManager.of({ attachStream, write, resize, cancel });
