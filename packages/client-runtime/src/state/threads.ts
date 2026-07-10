@@ -105,7 +105,14 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       ? current
       : {
           ...current,
-          status: "synchronizing" as const,
+          // A connected environment that already holds a full snapshot is
+          // current: the resume cursor guarantees any events missed while
+          // disconnected replay as live updates. Present that as "live" so the
+          // sync indicator clears instead of sticking on "synchronizing" when
+          // the server has nothing new to send after the cursor (the common
+          // case for a warm reconnect). Without data we are still doing the
+          // first fetch, so stay "synchronizing".
+          status: Option.isSome(current.data) ? ("live" as const) : ("synchronizing" as const),
           error: Option.none(),
         },
   );

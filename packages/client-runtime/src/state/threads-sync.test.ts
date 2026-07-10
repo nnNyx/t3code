@@ -450,6 +450,40 @@ describe("EnvironmentThreads", () => {
     }),
   );
 
+  it.effect("returns to live on reconnect with cached data even when nothing new replays", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({ cached: BASE_THREAD });
+      // The warm cache reaches live from the applied snapshot.
+      yield* awaitThreadState(harness.observed, (value) => value.status === "live");
+
+      // A disconnect drops back to "cached" while retaining the loaded data.
+      yield* SubscriptionRef.set(harness.supervisorState, AVAILABLE_CONNECTION_STATE);
+      yield* awaitThreadState(
+        harness.observed,
+        (value) => value.status === "cached" && Option.isSome(value.data),
+      );
+
+      // Reconnecting with the snapshot already in hand is current again — the
+      // resume cursor covers any gap — so the status must return to "live"
+      // without waiting for a fresh event the server may never send.
+      yield* SubscriptionRef.set(harness.supervisorState, {
+        desired: true,
+        network: "online",
+        phase: "connected",
+        stage: null,
+        attempt: 1,
+        generation: 1,
+        lastFailure: null,
+        retryAt: null,
+      });
+      const reconnected = yield* awaitThreadState(
+        harness.observed,
+        (value) => value.status === "live",
+      );
+      expect(Option.isSome(reconnected.data)).toBe(true);
+    }),
+  );
+
   it.effect("does not overwrite a live snapshot when the supervisor becomes ready", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({ cached: BASE_THREAD });
