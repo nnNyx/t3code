@@ -1,6 +1,7 @@
 import type { ExpoConfig } from "expo/config";
 
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
+import { isTruthy, stripPaidCapabilities } from "./personalTeam.ts";
 
 type AppVariant = "development" | "preview" | "production";
 
@@ -63,24 +64,32 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
 
-// Free-Apple-ID device builds: T3CODE_IOS_PERSONAL_TEAM=1 swaps the bundle id
-// and drops the capabilities a personal team cannot sign (app groups, Sign in
-// with Apple, push, associated domains). Ported from upstream PR #3579.
-const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
+// Free Apple *Personal Team* device builds. Setting T3CODE_PERSONAL_TEAM (truthy)
+// runs the fully-configured app through stripPaidCapabilities() at the bottom of
+// this file, dropping the widget extension and every entitlement a personal team
+// cannot provision (push, Sign in with Apple, associated domains, app groups).
+// Default builds are byte-for-byte untouched. T3CODE_IOS_PERSONAL_TEAM=1 is kept
+// as a backward-compatible alias for the same mode.
+const isPersonalTeamBuild =
+  isTruthy(repoEnv.T3CODE_PERSONAL_TEAM) || repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
+
+// A personal team cannot reuse a bundle id already registered to the paid team's
+// explicit App IDs, so an override is available. When unset the app keeps its
+// normal bundle id (Xcode registers it on first personal-team signing).
 const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
 // Reverse-DNS: two or more dot-separated segments (e.g. com.example.t3code).
 const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 if (
-  isIosPersonalTeamBuild &&
-  (!personalTeamBundleIdentifier ||
-    !IOS_BUNDLE_IDENTIFIER_PATTERN.test(personalTeamBundleIdentifier))
+  isPersonalTeamBuild &&
+  personalTeamBundleIdentifier &&
+  !IOS_BUNDLE_IDENTIFIER_PATTERN.test(personalTeamBundleIdentifier)
 ) {
   throw new Error(
-    "T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID must be a reverse-DNS identifier such as com.example.t3code when T3CODE_IOS_PERSONAL_TEAM=1.",
+    "T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID must be a reverse-DNS identifier such as com.example.t3code.",
   );
 }
 const iosBundleIdentifier =
-  isIosPersonalTeamBuild && personalTeamBundleIdentifier
+  isPersonalTeamBuild && personalTeamBundleIdentifier
     ? personalTeamBundleIdentifier
     : variant.iosBundleIdentifier;
 
@@ -140,19 +149,15 @@ const config: ExpoConfig = {
     icon: variant.iosIcon,
     supportsTablet: true,
     bundleIdentifier: iosBundleIdentifier,
-    ...(isIosPersonalTeamBuild
-      ? {}
-      : {
-          // Pin code signing to the T3 Tools team so non-interactive `expo run:ios`
-          // does not fall back to a personal team (which cannot sign app groups,
-          // Sign in with Apple, or push notification entitlements). Personal-team
-          // builds opt out explicitly via T3CODE_IOS_PERSONAL_TEAM=1.
-          appleTeamId: "ARK85ZXQ4Z",
-          associatedDomains: [
-            `applinks:${variant.relyingParty}`,
-            `webcredentials:${variant.relyingParty}`,
-          ],
-        }),
+    // Pin code signing to the T3 Tools team so non-interactive `expo run:ios`
+    // does not fall back to a personal team (which cannot sign app groups, Sign
+    // in with Apple, or push). Personal-team builds set T3CODE_PERSONAL_TEAM,
+    // and stripPaidCapabilities() removes appleTeamId + associatedDomains below.
+    appleTeamId: "ARK85ZXQ4Z",
+    associatedDomains: [
+      `applinks:${variant.relyingParty}`,
+      `webcredentials:${variant.relyingParty}`,
+    ],
     infoPlist: {
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: true,
@@ -203,7 +208,7 @@ const config: ExpoConfig = {
     ],
     "expo-secure-store",
     "expo-sqlite",
-    ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild }],
+    ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: true }],
     "expo-web-browser",
     [
       "expo-camera",
@@ -256,15 +261,13 @@ const config: ExpoConfig = {
     // would delete the asset catalog) and its xcodeproj mod creates the widget
     // target (which must exist before the compile phase can be attached).
     "./plugins/withWidgetLogoAsset.cjs",
-    ...(isIosPersonalTeamBuild
-      ? ["./plugins/withoutIosPersonalTeamCapabilities.cjs"]
-      : [widgetsPlugin]),
+    widgetsPlugin,
     "./plugins/withIosSceneLifecycle.cjs",
     "./plugins/withAndroidCleartextTraffic.cjs",
   ],
   extra: {
     appVariant: APP_VARIANT,
-    iosPersonalTeamBuild: isIosPersonalTeamBuild,
+    iosPersonalTeamBuild: isPersonalTeamBuild,
     relay: {
       url: repoEnv.T3CODE_RELAY_URL ?? null,
     },
@@ -293,4 +296,4 @@ const config: ExpoConfig = {
   owner: "eyeveil",
 };
 
-export default config;
+export default isPersonalTeamBuild ? stripPaidCapabilities(config) : config;
