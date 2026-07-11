@@ -371,8 +371,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       <div
         className={cn(
           "workspace-topbar gap-1 pl-2",
-          props.mode === "inline" ? "pr-28" : "pr-3",
-          ownsDesktopTitleBar && "wco:pr-[calc(var(--workspace-native-controls-inset)+6rem)]",
+          // Reserve room for the absolutely-positioned titlebar control cluster
+          // (maximize + 3 layout toggles = 124px) plus its 0.75rem right inset
+          // and a 0.25rem gutter matching the inter-control gap: 8.75rem.
+          props.mode === "inline" ? "pr-35" : "pr-3",
+          ownsDesktopTitleBar && "wco:pr-[calc(var(--workspace-native-controls-inset)+8rem)]",
           props.mode === "inline" && props.maximized && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
         )}
         data-right-panel-tabbar
