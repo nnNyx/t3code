@@ -22,6 +22,7 @@ import {
   type ProviderDriverKind,
   type ServerProvider,
   type ServerProviderModel,
+  type ServerProviderUsageWindow,
 } from "@t3tools/contracts";
 import { KeyRoundIcon } from "lucide-react";
 
@@ -75,6 +76,85 @@ function formatLimitedUntilLabel(limitedUntil: string | undefined): string {
     }
   }
   return "Recently limited";
+}
+
+function formatUsagePercent(value: number): string {
+  const clamped = Math.max(0, Math.min(100, value));
+  if (clamped > 0 && clamped < 10) {
+    return `${clamped.toFixed(1).replace(/\.0$/, "")}%`;
+  }
+  return `${Math.round(clamped)}%`;
+}
+
+function formatResetLabel(resetsAt: string | undefined): string | null {
+  if (!resetsAt) return null;
+  const parsed = new Date(resetsAt);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return `resets ${parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+/**
+ * Color for a usage bar keyed on how much of the window is consumed. Uses the
+ * same semantic tokens as the rest of the card (warning/destructive) so full
+ * plans read as urgent without a bespoke palette.
+ */
+function usageBarColorClass(usedPercent: number): string {
+  if (usedPercent >= 90) return "bg-destructive";
+  if (usedPercent >= 75) return "bg-warning";
+  return "bg-primary";
+}
+
+/**
+ * Slim per-plan usage progress bars rendered from the live provider snapshot's
+ * volatile `usage` windows (codex primary/secondary, Claude 5h/weekly). Absent
+ * usage renders nothing — drivers with no machine-readable telemetry show no
+ * bars rather than a fake one.
+ */
+function ProviderUsageBars(props: {
+  readonly usage: ReadonlyArray<ServerProviderUsageWindow> | undefined;
+}) {
+  const usage = props.usage;
+  if (usage === undefined || usage.length === 0) return null;
+  return (
+    <div className="mt-2 grid gap-1.5">
+      {usage.map((window) => {
+        const normalized = Math.max(0, Math.min(100, window.usedPercent));
+        const resetLabel = formatResetLabel(window.resetsAt);
+        return (
+          <div key={window.id} className="grid gap-1">
+            <div className="flex items-center justify-between gap-2 text-[11px] leading-none">
+              <span className="font-medium text-muted-foreground">{window.label}</span>
+              <span className="flex items-center gap-1.5 tabular-nums text-muted-foreground/70">
+                <span>{formatUsagePercent(window.usedPercent)}</span>
+                {resetLabel ? (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span>{resetLabel}</span>
+                  </>
+                ) : null}
+              </span>
+            </div>
+            <div
+              className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(normalized)}
+              aria-label={`${window.label} usage ${formatUsagePercent(window.usedPercent)}`}
+            >
+              <div
+                className={cn(
+                  "h-full rounded-full transition-[width] duration-500 ease-out motion-reduce:transition-none",
+                  usageBarColorClass(normalized),
+                )}
+                style={{ width: `${normalized}%` }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
@@ -818,6 +898,7 @@ export function ProviderInstanceCard({
             />
           </div>
         </div>
+        <ProviderUsageBars usage={liveProvider?.usage} />
       </div>
 
       <Collapsible open={isExpanded} onOpenChange={onExpandedChange}>

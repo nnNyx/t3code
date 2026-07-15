@@ -34,6 +34,7 @@ import { ProjectionCheckpointRepository } from "../src/persistence/Services/Proj
 import { ProjectionPendingApprovalRepository } from "../src/persistence/Services/ProjectionPendingApprovals.ts";
 import { AutoFallbackCoordinatorLive } from "../src/orchestration/autoFallback/AutoFallbackCoordinator.ts";
 import { AutoFallbackCooldownTrackerLive } from "../src/orchestration/autoFallback/CooldownTracker.ts";
+import { ProviderUsageTrackerLive } from "../src/provider/usage/ProviderUsageTracker.ts";
 import { makeAdapterRegistryMock } from "../src/provider/testUtils/providerAdapterRegistryMock.ts";
 import { ProviderAdapterRegistry } from "../src/provider/Services/ProviderAdapterRegistry.ts";
 import { makeProviderRegistryLayer } from "../src/provider/testUtils/providerRegistryMock.ts";
@@ -388,6 +389,7 @@ export const makeOrchestrationIntegrationHarness = (
     const layer = Layer.empty.pipe(
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(orchestrationReactorLayer),
+      Layer.provideMerge(ProviderUsageTrackerLive),
       Layer.provideMerge(providerRegistryLayer),
       Layer.provide(persistenceLayer),
       Layer.provideMerge(RepositoryIdentityResolver.layer),

@@ -80,6 +80,7 @@ import {
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import { AutoFallbackCooldownTracker } from "./orchestration/autoFallback/CooldownTracker.ts";
+import { ProviderUsageTracker } from "./provider/usage/ProviderUsageTracker.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -449,6 +450,7 @@ const makeWsRpcLayer = (
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
       const autoFallbackCooldownTracker = yield* AutoFallbackCooldownTracker;
+      const providerUsageTracker = yield* ProviderUsageTracker;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
@@ -951,6 +953,7 @@ const makeWsRpcLayer = (
         const keybindingsConfig = yield* keybindings.loadConfigState;
         const providers = yield* providerRegistry.getProviders.pipe(
           Effect.flatMap(autoFallbackCooldownTracker.decorateProviders),
+          Effect.flatMap(providerUsageTracker.decorateProviders),
         );
         const settings = ServerSettings.redactServerSettingsForClient(
           yield* serverSettings.getSettings,
@@ -1352,6 +1355,7 @@ const makeWsRpcLayer = (
               : providerRegistry.refresh()
             ).pipe(
               Effect.flatMap(autoFallbackCooldownTracker.decorateProviders),
+              Effect.flatMap(providerUsageTracker.decorateProviders),
               Effect.map((providers) => ({ providers })),
             ),
             { "rpc.aggregate": "server" },
@@ -1901,6 +1905,7 @@ const makeWsRpcLayer = (
               );
               const providerStatuses = providerRegistry.streamChanges.pipe(
                 Stream.mapEffect(autoFallbackCooldownTracker.decorateProviders),
+                Stream.mapEffect(providerUsageTracker.decorateProviders),
                 Stream.map((providers) => ({
                   version: 1 as const,
                   type: "providerStatuses" as const,

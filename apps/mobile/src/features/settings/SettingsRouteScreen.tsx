@@ -37,6 +37,7 @@ import { runtime } from "../../lib/runtime";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
+import { ProviderUsageSection } from "./components/ProviderUsageSection";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
@@ -113,6 +114,8 @@ function LocalSettingsRouteScreen() {
         <SettingsSection title="Appearance">
           <SettingsRow icon="paintbrush" label="Appearance" target="SettingsAppearance" />
         </SettingsSection>
+
+        <ProviderUsageSection />
 
         <ArchivedThreadsSettingsSection />
 
@@ -498,6 +501,8 @@ function ConfiguredSettingsRouteScreen() {
         <SettingsSection title="Appearance">
           <SettingsRow icon="paintbrush" label="Appearance" target="SettingsAppearance" />
         </SettingsSection>
+
+        <ProviderUsageSection />
 
         <ArchivedThreadsSettingsSection />
 

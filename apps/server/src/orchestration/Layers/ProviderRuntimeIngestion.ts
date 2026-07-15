@@ -28,6 +28,7 @@ import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { ProviderUsageTracker } from "../../provider/usage/ProviderUsageTracker.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { isGitRepository } from "../../git/Utils.ts";
@@ -636,6 +637,7 @@ const make = Effect.gen(function* () {
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
   const autoFallbackCoordinator = yield* AutoFallbackCoordinator;
+  const providerUsageTracker = yield* ProviderUsageTracker;
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
     crypto.randomUUIDv4.pipe(
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
@@ -1207,6 +1209,22 @@ const make = Effect.gen(function* () {
 
   const processRuntimeEvent = (event: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
+      // Per-plan usage telemetry: accumulate the driver's rate-limit windows
+      // for the emitting instance so the ws snapshot path can decorate the
+      // Providers cards with live progress bars. Handled ahead of the thread
+      // guard because usage is per-instance, not per-thread, and the instance
+      // is reliably stamped on the event by ProviderService.streamEvents.
+      if (event.type === "account.rate-limits.updated") {
+        if (event.providerInstanceId !== undefined) {
+          yield* providerUsageTracker.recordRateLimits({
+            instanceId: String(event.providerInstanceId),
+            driver: String(event.provider),
+            rateLimits: event.payload.rateLimits,
+          });
+        }
+        return;
+      }
+
       const thread = yield* resolveThreadShell(event.threadId);
       if (!thread) return;
 

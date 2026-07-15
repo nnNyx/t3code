@@ -84,6 +84,7 @@ import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import { PersistenceSqlError } from "./persistence/Errors.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import { AutoFallbackCooldownTrackerLive } from "./orchestration/autoFallback/CooldownTracker.ts";
+import { ProviderUsageTrackerLive } from "./provider/usage/ProviderUsageTracker.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/providerMaintenance.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -773,6 +774,7 @@ const buildAppUnderTest = (options?: {
 
     const appLayer = servedRoutesLayer.pipe(
       Layer.provide(AutoFallbackCooldownTrackerLive),
+      Layer.provide(ProviderUsageTrackerLive),
       Layer.provide(
         Layer.mock(BrowserTraceCollector.BrowserTraceCollector)({
           record: () => Effect.void,

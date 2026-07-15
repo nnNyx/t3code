@@ -51,6 +51,7 @@ import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRun
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor.ts";
 import { AutoFallbackCoordinatorLive } from "./orchestration/autoFallback/AutoFallbackCoordinator.ts";
 import { AutoFallbackCooldownTrackerLive } from "./orchestration/autoFallback/CooldownTracker.ts";
+import { ProviderUsageTrackerLive } from "./provider/usage/ProviderUsageTracker.ts";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor.ts";
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
@@ -301,10 +302,14 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // The coordinator is consumed by `ProviderRuntimeIngestionLive` (inside
   // ReactorLayerLive); the cooldown tracker is additionally read by the ws
   // snapshot path to decorate providers with `recentlyLimited`/`limitedUntil`.
+  // The usage tracker follows the same shape: written by runtime ingestion
+  // from `account.rate-limits.updated` events, read by the ws path to decorate
+  // providers with per-plan `usage` progress bars.
   // Core Services
   Layer.provideMerge(
     Layer.mergeAll(
       AutoFallbackCoordinatorLive.pipe(Layer.provideMerge(AutoFallbackCooldownTrackerLive)),
+      ProviderUsageTrackerLive,
       CheckpointingLayerLive,
     ),
   ),

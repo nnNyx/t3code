@@ -68,6 +68,29 @@ export const ServerProviderModel = Schema.Struct({
 });
 export type ServerProviderModel = typeof ServerProviderModel.Type;
 
+/**
+ * A single plan/usage rate-limit window surfaced by a provider driver.
+ *
+ * Populated only from machine-readable rate-limit telemetry the driver
+ * actually emits (codex `account/rateLimits/updated` primary/secondary
+ * windows; Claude `rate_limit_event` per-window utilization). Volatile —
+ * accumulated in-memory on the server and decorated onto snapshots at the
+ * ws push path, never persisted. Absent when the driver exposes nothing
+ * machine-readable, so the UI renders no bar rather than a fake one.
+ */
+export const ServerProviderUsageWindow = Schema.Struct({
+  // Stable machine key for the window, used by the client to key/dedupe
+  // bars (e.g. "primary", "secondary", "five_hour", "seven_day").
+  id: TrimmedNonEmptyString,
+  // Short human label rendered next to the bar (e.g. "5h", "Weekly").
+  label: TrimmedNonEmptyString,
+  // Percentage of the window consumed, clamped to 0-100.
+  usedPercent: Schema.Number,
+  // ISO-8601 instant the window resets, when the driver surfaced one.
+  resetsAt: Schema.optionalKey(IsoDateTime),
+});
+export type ServerProviderUsageWindow = typeof ServerProviderUsageWindow.Type;
+
 export const ServerProviderSlashCommandInput = Schema.Struct({
   hint: TrimmedNonEmptyString,
 });
@@ -196,6 +219,10 @@ export const ServerProvider = Schema.Struct({
   // surfaced reset timing; otherwise `recentlyLimited` alone is set.
   recentlyLimited: Schema.optionalKey(Schema.Boolean),
   limitedUntil: Schema.optionalKey(IsoDateTime),
+  // Volatile per-plan usage windows (progress-bar data) decorated onto the
+  // snapshot at ws push time from the driver's rate-limit telemetry. Never
+  // persisted; absent when the driver exposes no machine-readable usage.
+  usage: Schema.optionalKey(Schema.Array(ServerProviderUsageWindow)),
 });
 export type ServerProvider = typeof ServerProvider.Type;
 
