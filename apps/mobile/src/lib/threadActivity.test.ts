@@ -466,3 +466,82 @@ describe("buildThreadFeed", () => {
     });
   });
 });
+
+describe("buildThreadFeed windowing", () => {
+  function makeMessage(
+    id: string,
+    createdAt: string,
+    role: "user" | "assistant" = "assistant",
+  ): OrchestrationThread["messages"][number] {
+    return {
+      id: MessageId.make(id),
+      role,
+      text: `msg ${id}`,
+      turnId: null,
+      streaming: false,
+      createdAt,
+      updatedAt: createdAt,
+    };
+  }
+
+  function windowThread(messageCount: number): OrchestrationThread {
+    const messages = Array.from({ length: messageCount }, (_, i) =>
+      makeMessage(
+        `m${i}`,
+        `2026-04-01T00:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}.000Z`,
+      ),
+    );
+    const activities = Array.from({ length: messageCount }, (_, i) =>
+      makeActivity({
+        id: EventId.make(`a${i}`),
+        kind: "runtime.warning",
+        summary: `warning ${i}`,
+        createdAt: `2026-04-01T00:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}.500Z`,
+        payload: { message: `w${i}` },
+      }),
+    );
+    return makeThread({
+      id: ThreadId.make("thread-window"),
+      projectId: ProjectId.make("project-1"),
+      title: "Window",
+      messages,
+      activities,
+    });
+  }
+
+  it("returns the full feed unchanged when the thread fits in the window", () => {
+    const thread = windowThread(10);
+    const full = buildThreadFeed(thread);
+    const windowed = buildThreadFeed(thread, { window: 150 });
+    expect(windowed.some((e) => e.type === "load-earlier")).toBe(false);
+    expect(windowed.map((e) => e.id)).toEqual(full.map((e) => e.id));
+  });
+
+  it("prepends a load-earlier sentinel and materializes only the newest window", () => {
+    const thread = windowThread(500);
+    const windowed = buildThreadFeed(thread, { window: 150 });
+    expect(windowed[0]).toMatchObject({ type: "load-earlier" });
+    const sentinel = windowed[0] as { type: "load-earlier"; hiddenCount: number };
+    // 500 messages, newest 150 shown -> 350 hidden.
+    expect(sentinel.hiddenCount).toBe(350);
+    // The rest is bounded by the window, not the full 1000-entry feed.
+    expect(windowed.length).toBeLessThan(400);
+  });
+
+  it("windowed tail matches the tail of the full feed", () => {
+    const thread = windowThread(500);
+    const full = buildThreadFeed(thread);
+    const windowed = buildThreadFeed(thread, { window: 150 }).filter(
+      (e) => e.type !== "load-earlier",
+    );
+    const fullTail = full.slice(full.length - windowed.length);
+    expect(windowed.map((e) => e.id)).toEqual(fullTail.map((e) => e.id));
+  });
+
+  it("passes the sentinel through the presentation pass", () => {
+    const thread = windowThread(500);
+    const windowed = buildThreadFeed(thread, { window: 150 });
+    const presented = deriveThreadFeedPresentation(windowed, null, new Set(), new Set());
+    expect(presented[0]).toMatchObject({ type: "load-earlier" });
+  });
+});

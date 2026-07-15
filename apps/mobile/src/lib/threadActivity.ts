@@ -106,6 +106,16 @@ export type ThreadFeedEntry =
       readonly activities: ReadonlyArray<ThreadFeedActivity>;
     }
   | {
+      // Sentinel at the head of a windowed feed: older history exists but has
+      // not been materialized yet. Rendering it (scrolling near the top) asks
+      // the caller to widen the window. Never emitted when the whole thread
+      // fits in the window, so short threads behave exactly as before.
+      readonly type: "load-earlier";
+      readonly id: string;
+      readonly createdAt: string;
+      readonly hiddenCount: number;
+    }
+  | {
       readonly type: "work-toggle";
       readonly id: string;
       readonly createdAt: string;
@@ -229,6 +239,25 @@ function resolvePendingUserInputAnswer(
   return normalizeDraftAnswer(draft?.selectedOptionLabel);
 }
 
+// Per-activity derivation is pure in the activity object, and the thread
+// reducer reuses the object reference for every activity it does not touch
+// (only the newly appended/updated one is a fresh object). Keying the cache on
+// the activity identity therefore turns a full re-derivation on every publish
+// into O(changed activities): a live turn only pays for its own new events
+// instead of re-deriving all ~18k on a large thread. WeakMap so evicted
+// activities are collected with their thread snapshot.
+const derivedWorkLogEntryCache = new WeakMap<OrchestrationThreadActivity, DerivedWorkLogEntry>();
+
+function toDerivedWorkLogEntryMemoized(activity: OrchestrationThreadActivity): DerivedWorkLogEntry {
+  const cached = derivedWorkLogEntryCache.get(activity);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const derived = toDerivedWorkLogEntry(activity);
+  derivedWorkLogEntryCache.set(activity, derived);
+  return derived;
+}
+
 function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): DerivedWorkLogEntry[] {
@@ -240,7 +269,7 @@ function deriveWorkLogEntries(
     if (activity.kind === "context-window.updated") continue;
     if (activity.summary === "Checkpoint captured") continue;
     if (isPlanBoundaryToolActivity(activity)) continue;
-    entries.push(toDerivedWorkLogEntry(activity));
+    entries.push(toDerivedWorkLogEntryMemoized(activity));
   }
   return collapseDerivedWorkLogEntries(entries);
 }
@@ -1309,16 +1338,42 @@ export function buildPendingUserInputAnswers(
   return answers;
 }
 
+// Default count of newest messages materialized on a windowed open. Threads at
+// or under this size are unaffected (no sentinel, identical output to the full
+// build); larger histories page in older turns as the reader scrolls up.
+export const DEFAULT_THREAD_FEED_WINDOW_MESSAGES = 150;
+
 export function buildThreadFeed(
   thread: OrchestrationThread,
   options?: {
     readonly loadedMessages?: ReadonlyArray<OrchestrationThread["messages"][number]>;
+    // When set, materialize only the newest `window` messages (and the
+    // activities in that time range) and prepend a `load-earlier` sentinel if
+    // older content was trimmed. Bounds the per-publish feed build, the
+    // presentation pass, and the LegendList data array on huge threads.
+    // `loadedMessages`, when provided, takes precedence over `window`.
+    readonly window?: number;
   },
 ): ThreadFeedEntry[] {
-  const loadedMessages = options?.loadedMessages ?? thread.messages;
-  const oldestLoadedMessageCreatedAt =
-    options?.loadedMessages !== undefined ? (loadedMessages[0]?.createdAt ?? null) : null;
-  const workLogEntries = deriveWorkLogEntries(thread.activities);
+  const explicitLoadedMessages = options?.loadedMessages;
+  const window = options?.window;
+  const windowActive =
+    explicitLoadedMessages === undefined && window !== undefined && thread.messages.length > window;
+
+  const loadedMessages =
+    explicitLoadedMessages ?? (windowActive ? thread.messages.slice(-window) : thread.messages);
+  const hiddenMessageCount = windowActive ? thread.messages.length - loadedMessages.length : 0;
+
+  // Cutoff for both the message window and the activity window: filtering
+  // activities by createdAt BEFORE deriving keeps the (memoized) derivation and
+  // the sort bounded to the visible range instead of the full ~18k tail.
+  const isWindowed = explicitLoadedMessages !== undefined || windowActive;
+  const oldestLoadedMessageCreatedAt = isWindowed ? (loadedMessages[0]?.createdAt ?? null) : null;
+  const windowedActivities =
+    oldestLoadedMessageCreatedAt === null
+      ? thread.activities
+      : thread.activities.filter((activity) => activity.createdAt >= oldestLoadedMessageCreatedAt);
+  const workLogEntries = deriveWorkLogEntries(windowedActivities);
   const entries = Arr.sortWith(
     [
       ...loadedMessages.map<RawThreadFeedEntry>((message) => ({
@@ -1327,46 +1382,47 @@ export function buildThreadFeed(
         createdAt: message.createdAt,
         message,
       })),
-      ...workLogEntries
-        .filter((entry) => {
-          if (options?.loadedMessages === undefined) {
-            return true;
-          }
-          return (
-            oldestLoadedMessageCreatedAt === null || entry.createdAt >= oldestLoadedMessageCreatedAt
-          );
-        })
-        .map<RawThreadFeedEntry>((entry) => {
-          const summary = workEntryHeading(entry);
-          const detail = workEntryPreview(entry);
-          const fullDetail = buildWorkEntryExpandedBody(entry);
-          return {
-            type: "activity",
+      ...workLogEntries.map<RawThreadFeedEntry>((entry) => {
+        const summary = workEntryHeading(entry);
+        const detail = workEntryPreview(entry);
+        const fullDetail = buildWorkEntryExpandedBody(entry);
+        return {
+          type: "activity",
+          id: entry.id,
+          createdAt: entry.createdAt,
+          turnId: entry.turnId,
+          activity: {
             id: entry.id,
             createdAt: entry.createdAt,
             turnId: entry.turnId,
-            activity: {
-              id: entry.id,
-              createdAt: entry.createdAt,
-              turnId: entry.turnId,
-              summary,
-              detail,
-              fullDetail,
-              icon: workEntryIcon(entry),
-              copyText: [summary, detail, fullDetail]
-                .filter((value, index, values): value is string => {
-                  return Boolean(value) && values.indexOf(value) === index;
-                })
-                .join("\n"),
-              toolLike: workLogEntryIsToolLike(entry),
-              status: workEntryStatus(entry),
-            },
-          };
-        }),
+            summary,
+            detail,
+            fullDetail,
+            icon: workEntryIcon(entry),
+            copyText: [summary, detail, fullDetail]
+              .filter((value, index, values): value is string => {
+                return Boolean(value) && values.indexOf(value) === index;
+              })
+              .join("\n"),
+            toolLike: workLogEntryIsToolLike(entry),
+            status: workEntryStatus(entry),
+          },
+        };
+      }),
     ],
     (s) => new Date(s.createdAt),
     Order.Date,
   );
 
-  return groupAdjacentActivities(entries);
+  const grouped = groupAdjacentActivities(entries);
+  if (hiddenMessageCount > 0) {
+    const head = loadedMessages[0];
+    grouped.unshift({
+      type: "load-earlier",
+      id: "load-earlier",
+      createdAt: head?.createdAt ?? new Date(0).toISOString(),
+      hiddenCount: hiddenMessageCount,
+    });
+  }
+  return grouped;
 }

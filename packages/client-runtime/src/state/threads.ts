@@ -50,6 +50,13 @@ const CATCHUP_BATCH_INTERVAL = "100 millis";
 // subscription start when nothing has arrived yet.
 const CATCHUP_IDLE_FALLBACK_MS = 250;
 
+// Above this many combined messages+activities, persisting the full snapshot is
+// expensive enough (hundreds of ms to Schema-encode + stringify) that we space
+// out writes during live streaming. Chosen well above ordinary threads so only
+// pathological histories back off. See `persist` below.
+const LARGE_THREAD_PERSIST_ENTRY_THRESHOLD = 4_000;
+const LARGE_THREAD_PERSIST_COOLDOWN = "3 seconds";
+
 function statusWithoutLiveData(data: Option.Option<OrchestrationThread>): EnvironmentThreadStatus {
   return Option.isSome(data) ? "cached" : "empty";
 }
@@ -107,6 +114,19 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         ),
       ),
     );
+    // Persisting encodes + JSON-stringifies the entire snapshot. On a huge
+    // history (the Vale thread: ~18k activities, ~14MB) that Schema encode runs
+    // into the hundreds of ms on the JS thread, and a live turn publishes many
+    // times per second. The sliding(1) queue already coalesces to the newest
+    // snapshot; a post-persist cooldown proportional to snapshot size bounds how
+    // often such a thread re-serializes its whole body (so streaming stays
+    // smooth) while small threads keep persisting promptly. The resume cursor is
+    // stored with the snapshot, so a slightly older cache just replays the gap
+    // as live events on the next open — no data loss.
+    const size = snapshot.thread.activities.length + snapshot.thread.messages.length;
+    if (size > LARGE_THREAD_PERSIST_ENTRY_THRESHOLD) {
+      yield* Effect.sleep(LARGE_THREAD_PERSIST_COOLDOWN);
+    }
   });
 
   yield* Stream.fromQueue(persistence).pipe(

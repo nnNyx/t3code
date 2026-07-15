@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   CommandId,
@@ -21,7 +21,7 @@ import {
 } from "../lib/composerImages";
 import type { DraftComposerImageAttachment } from "../lib/composerImages";
 import { scopedThreadKey } from "../lib/scopedEntities";
-import { buildThreadFeed } from "../lib/threadActivity";
+import { buildThreadFeed, DEFAULT_THREAD_FEED_WINDOW_MESSAGES } from "../lib/threadActivity";
 import { appAtomRegistry } from "../state/atom-registry";
 import {
   appendComposerDraftAttachments,
@@ -104,10 +104,42 @@ export function useThreadComposerState() {
     () => (selectedThreadKey ? (queuedMessagesByThreadKey[selectedThreadKey] ?? []) : []),
     [queuedMessagesByThreadKey, selectedThreadKey],
   );
+  // How many of the newest messages to materialize for the open thread. Huge
+  // histories (e.g. the 1.7k-message Vale thread) build/render only this tail on
+  // open; scrolling to the head widens the window a page at a time. Keyed by
+  // thread so switching threads resets to the default window.
+  const [feedWindowByThread, setFeedWindowByThread] = useState<Record<string, number>>({});
+  const feedWindow = selectedThreadKey
+    ? (feedWindowByThread[selectedThreadKey] ?? DEFAULT_THREAD_FEED_WINDOW_MESSAGES)
+    : DEFAULT_THREAD_FEED_WINDOW_MESSAGES;
   const selectedThreadFeed = useMemo(
-    () => (selectedThreadDetail ? buildThreadFeed(selectedThreadDetail) : []),
-    [selectedThreadDetail],
+    () =>
+      selectedThreadDetail ? buildThreadFeed(selectedThreadDetail, { window: feedWindow }) : [],
+    [selectedThreadDetail, feedWindow],
   );
+  // Guard against a mounted sentinel firing repeatedly for the same window: only
+  // the first request at a given width grows it, and the wider window unmounts
+  // the sentinel until the reader scrolls to the new head.
+  const loadEarlierGuardRef = useRef<{ key: string | null; window: number }>({
+    key: null,
+    window: 0,
+  });
+  const onLoadEarlier = useCallback(() => {
+    if (!selectedThreadKey) {
+      return;
+    }
+    const guard = loadEarlierGuardRef.current;
+    if (guard.key === selectedThreadKey && guard.window === feedWindow) {
+      return;
+    }
+    loadEarlierGuardRef.current = { key: selectedThreadKey, window: feedWindow };
+    setFeedWindowByThread((current) => ({
+      ...current,
+      [selectedThreadKey]:
+        (current[selectedThreadKey] ?? DEFAULT_THREAD_FEED_WINDOW_MESSAGES) +
+        DEFAULT_THREAD_FEED_WINDOW_MESSAGES,
+    }));
+  }, [selectedThreadKey, feedWindow]);
 
   const selectedDraft = selectedThreadKey ? composerDrafts[selectedThreadKey] : null;
   const draftMessage = selectedDraft?.text ?? "";
@@ -399,6 +431,7 @@ export function useThreadComposerState() {
 
   return {
     selectedThreadFeed,
+    onLoadEarlier,
     selectedThreadQueuedMessages,
     activeWorkStartedAt,
     draftMessage,

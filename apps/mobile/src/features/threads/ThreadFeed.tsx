@@ -133,6 +133,7 @@ export interface ThreadFeedProps {
   readonly threadId: ThreadId;
   readonly workspaceRoot?: string | null;
   readonly feed: ReadonlyArray<ThreadFeedEntry>;
+  readonly onLoadEarlier: () => void;
   readonly contentPresentation: ThreadContentPresentation;
   readonly agentLabel: string;
   readonly latestTurn: ThreadFeedLatestTurn | null;
@@ -816,6 +817,7 @@ function renderFeedEntry(
     readonly onToggleTurnFold: (turnId: TurnId) => void;
     readonly onPressImage: (uri: string, headers?: Record<string, string>) => void;
     readonly onMarkdownLinkPress: (href: string) => void;
+    readonly onLoadEarlier: () => void;
     readonly iconSubtleColor: string | import("react-native").ColorValue;
     readonly userBubbleColor: string | import("react-native").ColorValue;
     readonly markdownStyles: MarkdownStyleSets;
@@ -827,6 +829,10 @@ function renderFeedEntry(
 ) {
   const entry = info.item;
   const { markdownStyles, iconSubtleColor, userBubbleColor } = props;
+
+  if (entry.type === "load-earlier") {
+    return <LoadEarlierRow onLoadEarlier={props.onLoadEarlier} />;
+  }
 
   if (entry.type === "turn-fold") {
     return (
@@ -1282,6 +1288,30 @@ function ThreadFeedPlaceholder(props: {
 // isNativeLayoutNoise then drops the real correction), which overlapped rows.
 const TURN_FOLD_ROW_HEIGHT = 56;
 const WORK_TOGGLE_ROW_HEIGHT = 36;
+const LOAD_EARLIER_ROW_HEIGHT = 44;
+
+// Head sentinel of a windowed feed. LegendList only mounts rows within its draw
+// distance, so this row mounting means the reader has scrolled to the current
+// head — the cue to page in the next window of older history. Firing on mount
+// (once per instance) turns scroll-to-top into automatic upward paging; the
+// widened window unmounts this instance until the new head is reached, and
+// maintainVisibleContentPosition keeps the viewport pinned as content prepends.
+const LoadEarlierRow = memo(function LoadEarlierRow(props: { readonly onLoadEarlier: () => void }) {
+  const requestedRef = useRef(false);
+  useEffect(() => {
+    if (requestedRef.current) {
+      return;
+    }
+    requestedRef.current = true;
+    props.onLoadEarlier();
+  }, [props.onLoadEarlier]);
+
+  return (
+    <View style={{ height: LOAD_EARLIER_ROW_HEIGHT }} className="mb-2 items-center justify-center">
+      <ActivityIndicator />
+    </View>
+  );
+});
 
 // Gap between the floating jump-to-bottom arrow and the composer/keyboard it
 // rests above.
@@ -1510,6 +1540,9 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     }
     if (entry.type === "work-toggle") {
       return WORK_TOGGLE_ROW_HEIGHT;
+    }
+    if (entry.type === "load-earlier") {
+      return LOAD_EARLIER_ROW_HEIGHT;
     }
     return undefined;
   }, []);
@@ -1821,6 +1854,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         reviewCommentBubbleWidth,
         userBubbleMaxWidth,
         feedOpenedAt,
+        onLoadEarlier: props.onLoadEarlier,
         skills: props.skills,
       }),
     [
@@ -1842,6 +1876,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       onToggleWorkGroup,
       onToggleWorkRow,
       props.environmentId,
+      props.onLoadEarlier,
       props.skills,
     ],
   );
