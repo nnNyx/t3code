@@ -148,7 +148,12 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions) {
 
   const enqueue = (message: QueuedThreadMessage): Promise<void> =>
     serialize(async () => {
-      const applyToMemory = (): void => setMessages([...currentMessages(), message]);
+      // Dedup by messageId so a retry/re-enqueue never doubles the row (upstream parity).
+      const applyToMemory = (): void =>
+        setMessages([
+          ...currentMessages().filter((candidate) => candidate.messageId !== message.messageId),
+          message,
+        ]);
       // Best-effort: enqueue in memory first so a persistence hiccup can never
       // lose the send. Strict: only enqueue once the durable write succeeds.
       if (bestEffortPersistence) {

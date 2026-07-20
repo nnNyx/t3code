@@ -19,6 +19,11 @@ import "../global.css";
 const appLinking = {
   prefixes: [Linking.createURL("/"), "t3code://", "t3code-dev://", "t3code-preview://"],
   config: navigationPathConfig,
+  // The Expo dev client launches the app via
+  // <scheme>://expo-development-client/?url=<packager> — that URL addresses
+  // the launcher, not app navigation. Without this filter it falls through
+  // to the NotFound wildcard route on every dev launch.
+  filter: (url: string) => !url.includes("expo-development-client"),
 };
 
 const Navigation = createStaticNavigation(RootStack);

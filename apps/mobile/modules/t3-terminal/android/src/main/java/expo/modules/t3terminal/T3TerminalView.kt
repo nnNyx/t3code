@@ -76,6 +76,17 @@ class T3TerminalView(context: Context, appContext: AppContext) : ExpoView(contex
       }
     }
 
+  var autoFocus: Boolean = true
+    set(value) {
+      field = value
+      if (value) {
+        requestKeyboardFocus()
+      } else {
+        inputView.clearFocus()
+        hideKeyboard()
+      }
+    }
+
   var backgroundColorHex: String = "#24292E"
     set(value) {
       field = value
@@ -207,6 +218,13 @@ class T3TerminalView(context: Context, appContext: AppContext) : ExpoView(contex
   private fun requestKeyboardFocus() {
     inputView.requestFocus()
     showKeyboard()
+  }
+
+  private fun hideKeyboard() {
+    val inputMethodManager = context.getSystemService(
+      Context.INPUT_METHOD_SERVICE
+    ) as? InputMethodManager
+    inputMethodManager?.hideSoftInputFromWindow(windowToken, 0)
   }
 
   private fun applyTheme() {

@@ -1,5 +1,6 @@
 import type { ExpoConfig } from "expo/config";
 
+import { BRAND_ASSET_PATHS } from "../../scripts/lib/brand-assets.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 import { isTruthy, stripPaidCapabilities } from "./personalTeam.ts";
 
@@ -9,6 +10,11 @@ const repoEnv = loadRepoEnv();
 Object.assign(process.env, repoEnv);
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
+
+// Brand icon/splash assets moved to the repo-root `assets/<channel>/` registry
+// (upstream branding refresh). Local `assets/*.icon`/`splash-icon-*.png` were
+// removed, so the per-variant iOS icon + splash now resolve through here.
+const fromRepoRoot = (relativePath: string) => `../../${relativePath}`;
 
 const VARIANT_CONFIG: Record<
   AppVariant,
@@ -25,8 +31,8 @@ const VARIANT_CONFIG: Record<
   development: {
     appName: "T3 Code Dev",
     scheme: "t3code-dev",
-    iosIcon: "./assets/icon-composer-dev.icon",
-    splashIcon: "./assets/splash-icon-dev.png",
+    iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIconComposerProject),
+    splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
     iosBundleIdentifier: "com.t3tools.t3code.dev",
     androidPackage: "com.t3tools.t3code.dev",
     relyingParty: "clerk.t3.codes",
@@ -34,8 +40,8 @@ const VARIANT_CONFIG: Record<
   preview: {
     appName: "T3 Code Preview",
     scheme: "t3code-preview",
-    iosIcon: "./assets/icon-composer-prod.icon",
-    splashIcon: "./assets/splash-icon-prod.png",
+    iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIconComposerProject),
+    splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
     iosBundleIdentifier: "com.t3tools.t3code.preview",
     androidPackage: "com.t3tools.t3code.preview",
     relyingParty: "clerk.t3.codes",
@@ -43,8 +49,8 @@ const VARIANT_CONFIG: Record<
   production: {
     appName: "T3 Code",
     scheme: "t3code",
-    iosIcon: "./assets/icon-composer-prod.icon",
-    splashIcon: "./assets/splash-icon-prod.png",
+    iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIconComposerProject),
+    splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
     iosBundleIdentifier: "com.t3tools.t3code",
     androidPackage: "com.t3tools.t3code",
     relyingParty: "clerk.t3.codes",
