@@ -170,6 +170,7 @@ function buildProps() {
   return {
     isWorking: false,
     activeTurnInProgress: false,
+    isHydrating: false,
     activeTurnStartedAt: null,
     verboseWorkLog: false,
     listRef: createRef<LegendListRef | null>(),

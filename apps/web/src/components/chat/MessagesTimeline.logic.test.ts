@@ -638,6 +638,41 @@ describe("deriveMessagesTimelineRows", () => {
     expect(foldRow?.label).toBe("Worked for 12s");
   });
 
+  it("suppresses the working indicator row while the thread is hydrating", () => {
+    // Annotated so the standalone literal gets the same contextual typing the
+    // sibling tests get by inlining (branded ids are cast with `as never`).
+    const baseInput: Parameters<typeof deriveMessagesTimelineRows>[0] = {
+      timelineEntries: [
+        {
+          id: "message-user-1",
+          kind: "message" as const,
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "message-user-1" as never,
+            role: "user" as const,
+            text: "Hello",
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+      ],
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:00:14Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    };
+
+    // Live: the working indicator is present.
+    const liveRows = deriveMessagesTimelineRows(baseInput);
+    expect(liveRows.some((row) => row.kind === "working")).toBe(true);
+
+    // Hydrating (catch-up after a login after absence): a stale base snapshot
+    // must not flap the working indicator — it is suppressed until settle.
+    const hydratingRows = deriveMessagesTimelineRows({ ...baseInput, isHydrating: true });
+    expect(hydratingRows.some((row) => row.kind === "working")).toBe(false);
+  });
+
   it("uses latest-turn timings and the stopped label for an interrupted latest turn", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [

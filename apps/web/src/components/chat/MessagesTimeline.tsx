@@ -141,6 +141,9 @@ interface TimelineRowActivityState {
   isWorking: boolean;
   isRevertingCheckpoint: boolean;
   activeTurnInProgress: boolean;
+  /** Catch-up in progress: suppress live-only presentation so settled turns
+   *  render in their final state instantly instead of animating on open. */
+  isHydrating: boolean;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -156,6 +159,10 @@ const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "d
 interface MessagesTimelineProps {
   isWorking: boolean;
   activeTurnInProgress: boolean;
+  /** True while the thread is folding its catch-up replay tail after a login
+   *  after absence — the timeline renders settled turns without streaming/
+   *  working animation until catch-up settles (the web hydration gate). */
+  isHydrating: boolean;
   activeTurnStartedAt: string | null;
   verboseWorkLog: boolean;
   listRef: React.RefObject<LegendListRef | null>;
@@ -192,6 +199,7 @@ interface MessagesTimelineProps {
 export const MessagesTimeline = memo(function MessagesTimeline({
   isWorking,
   activeTurnInProgress,
+  isHydrating,
   activeTurnStartedAt,
   verboseWorkLog,
   listRef,
@@ -307,6 +315,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         expandedTurnIds,
         expandedWorkGroupIds,
         isWorking,
+        isHydrating,
         verboseWorkLog,
         activeTurnStartedAt,
         turnDiffSummaryByAssistantMessageId,
@@ -319,6 +328,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       expandedTurnIds,
       expandedWorkGroupIds,
       isWorking,
+      isHydrating,
       verboseWorkLog,
       activeTurnStartedAt,
       turnDiffSummaryByAssistantMessageId,
@@ -451,8 +461,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       isWorking,
       isRevertingCheckpoint,
       activeTurnInProgress,
+      isHydrating,
     }),
-    [activeTurnInProgress, isRevertingCheckpoint, isWorking],
+    [activeTurnInProgress, isRevertingCheckpoint, isWorking, isHydrating],
   );
 
   // Stable renderItem — no closure deps. Row components read shared state
@@ -991,7 +1002,12 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const activity = use(TimelineRowActivityCtx);
+  // During catch-up a stale base snapshot can still carry `streaming: true` for a
+  // turn that finished days ago; render it settled (no streaming presentation)
+  // until catch-up completes, then live streaming animates as designed.
+  const isStreaming = !activity.isHydrating && Boolean(row.message.streaming);
+  const messageText = row.message.text || (isStreaming ? "" : "(empty response)");
 
   return (
     <>
@@ -1000,7 +1016,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           text={messageText}
           cwd={ctx.markdownCwd}
           threadRef={ctx.threadRef ?? undefined}
-          isStreaming={Boolean(row.message.streaming)}
+          isStreaming={isStreaming}
           skills={ctx.skills}
         />
         <AssistantChangedFilesSection

@@ -43,3 +43,17 @@ export function useEnvironmentThread(
     () => EMPTY_ENVIRONMENT_THREAD_STATE,
   ) as EnvironmentThreadState;
 }
+
+/**
+ * True while a thread is still folding its catch-up replay tail (see
+ * client-runtime `threads.ts`). The timeline gates live-only presentation —
+ * streaming-text growth, the "working" indicator — on this so a login after
+ * absence renders already-settled turns in their final state instantly instead
+ * of replaying them as if live. Flips false the moment catch-up settles.
+ */
+export function useThreadHydrating(
+  environmentId: EnvironmentId | null,
+  threadId: ThreadId | null,
+): boolean {
+  return useEnvironmentThread(environmentId, threadId).hydrating;
+}

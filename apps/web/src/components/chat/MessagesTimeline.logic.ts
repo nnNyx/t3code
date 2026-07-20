@@ -374,6 +374,9 @@ export function deriveMessagesTimelineRows(input: {
   expandedTurnIds?: ReadonlySet<TurnId>;
   expandedWorkGroupIds?: ReadonlySet<string>;
   isWorking: boolean;
+  /** Catch-up in progress after a login after absence: suppress the live
+   *  "working" indicator so a stale base snapshot does not flap it on open. */
+  isHydrating?: boolean;
   verboseWorkLog?: boolean;
   activeTurnStartedAt: string | null;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
@@ -541,7 +544,7 @@ export function deriveMessagesTimelineRows(input: {
     });
   }
 
-  if (input.isWorking) {
+  if (input.isWorking && !input.isHydrating) {
     nextRows.push({
       kind: "working",
       id: "working-indicator-row",

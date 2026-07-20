@@ -589,6 +589,51 @@ describe("EnvironmentThreads", () => {
     }),
   );
 
+  it.effect("stays hydrating and paints no intermediate turn states during catch-up", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({ cached: BASE_THREAD });
+      // First paint from the warm cache: data is present but the catch-up window
+      // is still open, so the hydration gate is engaged.
+      const live = yield* awaitThreadState(harness.observed, (value) => value.status === "live");
+      expect(live.hydrating).toBe(true);
+
+      // Replay a run of finished-turn events. While catching up they must fold
+      // silently — not one intermediate publish, so the UI never replays them.
+      const publishesBefore = yield* Ref.get(harness.publishedStates);
+      for (let index = 0; index < 10; index += 1) {
+        yield* Queue.offer(
+          harness.inputs,
+          titleUpdated(`Replay ${index + 1}`, CACHED_SNAPSHOT_SEQUENCE + 1 + index),
+        );
+      }
+      for (let tick = 0; tick < 20; tick += 1) {
+        yield* Effect.yieldNow;
+      }
+      expect((yield* Ref.get(harness.publishedStates)) - publishesBefore).toBe(0);
+      expect((yield* Ref.get(harness.latest)).hydrating).toBe(true);
+
+      // The sentinel settles catch-up: one publish lands the fully-folded state
+      // and clears the gate.
+      yield* Queue.offer(harness.inputs, caughtUp(CACHED_SNAPSHOT_SEQUENCE + 10));
+      const settled = yield* awaitThreadState(
+        harness.observed,
+        (value) =>
+          value.hydrating === false &&
+          Option.isSome(value.data) &&
+          value.data.value.title === "Replay 10",
+      );
+      expect(settled.hydrating).toBe(false);
+
+      // Post-hydration a live event paints per event with the gate released.
+      yield* Queue.offer(harness.inputs, titleUpdated("Live", CACHED_SNAPSHOT_SEQUENCE + 11));
+      const liveAfter = yield* awaitThreadState(
+        harness.observed,
+        (value) => Option.isSome(value.data) && value.data.value.title === "Live",
+      );
+      expect(liveAfter.hydrating).toBe(false);
+    }),
+  );
+
   it.effect("switches to per-event publishing once the sentinel arrives", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({ cached: BASE_THREAD });

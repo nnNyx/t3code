@@ -196,7 +196,7 @@ import {
   serverEnvironment,
 } from "../state/server";
 import { terminalEnvironment } from "../state/terminal";
-import { threadEnvironment } from "../state/threads";
+import { threadEnvironment, useThreadHydrating } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
 import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
 import {
@@ -1392,6 +1392,14 @@ function ChatViewContent(props: ChatViewProps) {
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
   }, [draftThreadKeys, openTerminalThreadKeys, serverThreadKeys]);
   const activeLatestTurn = activeThread?.latestTurn ?? null;
+  // Web hydration gate: true while this thread is still folding its catch-up
+  // replay tail after a login after absence. Only server threads sync; drafts
+  // never hydrate. Gates streaming/working animation in the timeline so settled
+  // turns render in their final state instantly instead of replaying as if live.
+  const activeThreadHydrating = useThreadHydrating(
+    isServerThread ? (activeThread?.environmentId ?? null) : null,
+    isServerThread ? (activeThread?.id ?? null) : null,
+  );
   const sourcePlanThreadRef = useMemo(() => {
     const sourceThreadId = activeLatestTurn?.sourceProposedPlan?.threadId;
     if (!activeThread || !sourceThreadId || sourceThreadId === activeThread.id) {
@@ -5463,6 +5471,7 @@ function ChatViewContent(props: ChatViewProps) {
                 key={activeThread.id}
                 isWorking={isWorking}
                 activeTurnInProgress={isWorking || !latestTurnSettled}
+                isHydrating={activeThreadHydrating}
                 activeTurnStartedAt={activeWorkStartedAt}
                 verboseWorkLog={verboseWorkLog}
                 listRef={legendListRef}
