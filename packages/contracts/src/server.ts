@@ -81,7 +81,8 @@ export type ServerProviderModel = typeof ServerProviderModel.Type;
  */
 export const ServerProviderUsageWindow = Schema.Struct({
   // Stable machine key for the window, used by the client to key/dedupe
-  // bars (e.g. "primary", "secondary", "five_hour", "seven_day").
+  // bars (e.g. "five_hour", "seven_day"). Positional provider fields such as
+  // Codex's primary/secondary are normalized from their reported duration.
   id: TrimmedNonEmptyString,
   // Short human label rendered next to the bar (e.g. "5h", "Weekly").
   label: TrimmedNonEmptyString,

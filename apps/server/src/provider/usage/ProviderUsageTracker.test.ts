@@ -46,7 +46,7 @@ describe("ProviderUsageTracker", () => {
         ]);
 
         expect(result[0]?.usage).toHaveLength(2);
-        expect(result[0]?.usage?.[0]?.id).toBe("primary");
+        expect(result[0]?.usage?.[0]?.id).toBe("five_hour");
         expect(result[1]?.usage).toBeUndefined();
       }),
     );
@@ -92,15 +92,15 @@ describe("ProviderUsageTracker", () => {
         const baseline = {
           ...provider("codex-probed"),
           usage: [
-            { id: "primary", label: "5h", usedPercent: 20 },
-            { id: "secondary", label: "Weekly", usedPercent: 10 },
+            { id: "five_hour", label: "5h", usedPercent: 20 },
+            { id: "seven_day", label: "Weekly", usedPercent: 10 },
           ],
         } satisfies ServerProvider;
         const [decorated] = yield* tracker.decorateProviders([baseline]);
 
         expect(decorated?.usage).toEqual([
-          { id: "primary", label: "5h", usedPercent: 45 },
-          { id: "secondary", label: "Weekly", usedPercent: 10 },
+          { id: "five_hour", label: "5h", usedPercent: 45 },
+          { id: "seven_day", label: "Weekly", usedPercent: 10 },
         ]);
       }),
     );
@@ -129,7 +129,9 @@ describe("ProviderUsageTracker", () => {
         });
         const [decorated] = yield* tracker.decorateProviders([provider("codex-replace")]);
 
-        expect(decorated?.usage).toEqual([{ id: "primary", label: "Primary", usedPercent: 30 }]);
+        expect(decorated?.usage).toEqual([
+          { id: "codex_primary", label: "Primary", usedPercent: 30 },
+        ]);
       }),
     );
 
@@ -150,7 +152,7 @@ describe("ProviderUsageTracker", () => {
         const usage = decorated?.usage ?? [];
 
         expect(usage).toHaveLength(1);
-        expect(usage[0]?.id).toBe("secondary");
+        expect(usage[0]?.id).toBe("seven_day");
       }),
     );
 

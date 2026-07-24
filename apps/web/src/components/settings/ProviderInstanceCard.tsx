@@ -107,7 +107,7 @@ function usageBarColorClass(usedPercent: number): string {
 const PRIMARY_USAGE_WINDOW_IDS: Partial<
   Record<string, readonly [fiveHour: string, sevenDay: string]>
 > = {
-  codex: ["primary", "secondary"],
+  codex: ["five_hour", "seven_day"],
   claudeAgent: ["five_hour", "seven_day"],
 };
 

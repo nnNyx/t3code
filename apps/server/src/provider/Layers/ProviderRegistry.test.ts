@@ -374,13 +374,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
 
           assert.deepStrictEqual(status.usage, [
             {
-              id: "primary",
+              id: "five_hour",
               label: "5h",
               usedPercent: 25,
               resetsAt: "2030-03-17T17:46:40.000Z",
             },
             {
-              id: "secondary",
+              id: "seven_day",
               label: "Weekly",
               usedPercent: 40,
               resetsAt: "2030-03-17T17:46:40.000Z",

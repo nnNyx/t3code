@@ -117,7 +117,7 @@ function unwrapCodexSnapshot(raw: unknown): Record<string, unknown> | undefined 
 }
 
 function mapCodexWindow(
-  id: string,
+  slotId: "primary" | "secondary",
   raw: unknown,
   fallbackLabel: string,
   fallbackSortWeight: number,
@@ -127,10 +127,20 @@ function mapCodexWindow(
   const usedPercent = finiteNumber(record.usedPercent);
   if (usedPercent === undefined) return undefined;
   const minutes = finiteNumber(record.windowDurationMins);
+  // `primary` and `secondary` describe positions in Codex's compatibility
+  // payload, not durations. Codex can put a weekly-only limit in `primary`,
+  // so key the two UI windows from the provider-reported duration instead of
+  // assuming primary=5h and secondary=7d.
+  const knownWindow =
+    minutes === 5 * 60
+      ? { id: "five_hour", label: "5h" }
+      : minutes === 7 * 24 * 60
+        ? { id: "seven_day", label: "Weekly" }
+        : undefined;
   return {
     window: makeWindow({
-      id,
-      label: windowLabelFromMinutes(minutes ?? undefined, fallbackLabel),
+      id: knownWindow?.id ?? `codex_${slotId}`,
+      label: knownWindow?.label ?? windowLabelFromMinutes(minutes ?? undefined, fallbackLabel),
       usedPercent,
       resetsAt: toResetIso(record.resetsAt),
     }),
@@ -142,12 +152,15 @@ function mapCodexWindow(
 export function mapCodexRateLimits(rawRateLimits: unknown): ReadonlyArray<RankedUsageWindow> {
   const snapshot = unwrapCodexSnapshot(rawRateLimits);
   if (snapshot === undefined) return [];
-  const windows: RankedUsageWindow[] = [];
+  const windows = new Map<string, RankedUsageWindow>();
   const primary = mapCodexWindow("primary", snapshot.primary, "Primary", 5 * 60);
-  if (primary !== undefined) windows.push(primary);
+  if (primary !== undefined) windows.set(primary.window.id, primary);
   const secondary = mapCodexWindow("secondary", snapshot.secondary, "Weekly", 7 * 24 * 60);
-  if (secondary !== undefined) windows.push(secondary);
-  return windows;
+  if (secondary !== undefined) windows.set(secondary.window.id, secondary);
+  return [...windows.values()].sort(
+    (left, right) =>
+      left.sortWeight - right.sortWeight || left.window.id.localeCompare(right.window.id),
+  );
 }
 
 const CLAUDE_WINDOW_META: Record<string, { readonly label: string; readonly sortWeight: number }> =

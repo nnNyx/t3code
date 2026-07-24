@@ -37,13 +37,13 @@ describe("mapCodexRateLimits", () => {
     const windows = mapCodexRateLimits(rateLimits);
     expect(windows).toHaveLength(2);
     expect(windows[0]?.window).toEqual({
-      id: "primary",
+      id: "five_hour",
       label: "5h",
       usedPercent: 62,
       resetsAt: RESET_ISO,
     });
     expect(windows[1]?.window).toEqual({
-      id: "secondary",
+      id: "seven_day",
       label: "Weekly",
       usedPercent: 18,
       resetsAt: RESET_ISO,
@@ -52,13 +52,40 @@ describe("mapCodexRateLimits", () => {
     expect(windows[0]?.sortWeight).toBeLessThan(windows[1]!.sortWeight);
   });
 
-  it("handles a single-window snapshot and clamps percent", () => {
+  it("classifies a weekly-only primary window by duration", () => {
+    const windows = mapCodexRateLimits({
+      rateLimits: {
+        limitId: "codex",
+        primary: {
+          usedPercent: 30,
+          windowDurationMins: 10_080,
+          resetsAt: RESET_EPOCH_SECONDS,
+        },
+        secondary: null,
+      },
+    });
+
+    expect(windows).toEqual([
+      {
+        window: {
+          id: "seven_day",
+          label: "Weekly",
+          usedPercent: 30,
+          resetsAt: RESET_ISO,
+        },
+        sortWeight: 10_080,
+      },
+    ]);
+  });
+
+  it("keeps a duration-less positional window out of the 5h/7d slots", () => {
     const windows = mapCodexRateLimits({
       rateLimits: { primary: { usedPercent: 140 } },
     });
     expect(windows).toHaveLength(1);
     expect(windows[0]?.window.usedPercent).toBe(100);
     expect(windows[0]?.window.label).toBe("Primary");
+    expect(windows[0]?.window.id).toBe("codex_primary");
     expect(windows[0]?.window.resetsAt).toBeUndefined();
   });
 
