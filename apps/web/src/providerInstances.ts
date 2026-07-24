@@ -21,6 +21,7 @@ import {
   ProviderInstanceId,
   type ServerProvider,
   type ServerProviderModel,
+  type ServerConfig,
   type ServerSettings,
   type ServerProviderState,
 } from "@t3tools/contracts";
@@ -180,6 +181,26 @@ export function deriveProviderInstanceEntries(
       models: snapshot.models,
     } satisfies ProviderInstanceEntry;
   });
+}
+
+/**
+ * Index provider metadata within its owning environment. Provider instance ids
+ * are server-local, so flattening every environment into the primary server's
+ * map makes remote custom instances lose their driver icon and capabilities.
+ */
+export function indexProviderInstancesByEnvironment(
+  serverConfigs: ReadonlyMap<string, Pick<ServerConfig, "providers">>,
+): ReadonlyMap<string, ReadonlyMap<string, ProviderInstanceEntry>> {
+  return new Map(
+    Array.from(serverConfigs, ([environmentId, config]) => [
+      environmentId,
+      new Map(
+        deriveProviderInstanceEntries(config.providers).map(
+          (entry) => [entry.instanceId as string, entry] as const,
+        ),
+      ),
+    ]),
+  );
 }
 
 /**

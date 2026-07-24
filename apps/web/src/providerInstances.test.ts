@@ -4,6 +4,7 @@ import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
   getDefaultProviderInstanceModel,
+  indexProviderInstancesByEnvironment,
   isProviderInstancePickerReady,
   isProviderInstancePickerVisible,
   resolveDefaultProviderModelSelection,
@@ -81,6 +82,39 @@ describe("isProviderInstancePickerVisible", () => {
 
     expect(enabledEntry && isProviderInstancePickerVisible(enabledEntry)).toBe(true);
     expect(disabledEntry && isProviderInstancePickerVisible(disabledEntry)).toBe(false);
+  });
+});
+
+describe("indexProviderInstancesByEnvironment", () => {
+  it("keeps remote custom provider identities scoped to their server", () => {
+    const entries = indexProviderInstancesByEnvironment(
+      new Map([
+        [
+          "local",
+          {
+            providers: [
+              provider({ provider: ProviderDriverKind.make("claudeAgent"), instanceId: "shared" }),
+            ],
+          },
+        ],
+        [
+          "remote",
+          {
+            providers: [
+              provider({ provider: ProviderDriverKind.make("codex"), instanceId: "shared" }),
+              provider({
+                provider: ProviderDriverKind.make("codex"),
+                instanceId: "codex_personal",
+              }),
+            ],
+          },
+        ],
+      ]),
+    );
+
+    expect(entries.get("local")?.get("shared")?.driverKind).toBe("claudeAgent");
+    expect(entries.get("remote")?.get("shared")?.driverKind).toBe("codex");
+    expect(entries.get("remote")?.get("codex_personal")?.driverKind).toBe("codex");
   });
 });
 
